@@ -1,0 +1,54 @@
+# Agent model assignments
+# Groq models (free tier testing)
+models_groq:
+  research: llama-3.3-70b-versatile        # strong reasoning for corpus analysis
+  vision: llama-3.2-11b-vision-preview      # multimodal for image descriptions
+  drafting: llama-3.3-70b-versatile         # best available for writing quality
+  memory_updater: llama-3.1-8b-instant      # fast, lightweight for rule extraction
+
+# OpenAI models (mid-tier, 128K context)
+models_openai:
+  research: gpt-4o
+  vision: gpt-4o-mini
+  drafting: gpt-4o
+  memory_updater: gpt-4o-mini
+
+# Anthropic models (production)
+models_anthropic:
+  research: claude-sonnet-4-6
+  vision: claude-haiku-4-5-20251001
+  drafting: claude-opus-4-6
+  memory_updater: claude-sonnet-4-6
+
+# Pinecone settings
+pinecone:
+  index_name: flytbase-docs
+  embedding_model: all-MiniLM-L6-v2   # local, free, sentence-transformers
+  embedding_dimension: 384
+  metric: dotproduct     # dotproduct works best with normalized embeddings for hybrid search
+  cloud: aws
+  region: us-east-1
+
+# Corpus ingestion
+ingestion:
+  sources:
+    - url: https://docs.flytbase.com
+      type: doc
+    - url: https://releases.flytbase.com
+      type: release
+  chunk_max_tokens: 512
+  chunk_overlap_tokens: 50
+
+# Retrieval settings
+retrieval:
+  sub_queries: 5
+  top_k_per_query: 30
+  rerank_top_n: 10
+  rerank_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+
+# Output paths
+paths:
+  input_bundles: ./input_bundles
+  output: ./output
+  memory: ./memory
+  mailbox: ./mailbox

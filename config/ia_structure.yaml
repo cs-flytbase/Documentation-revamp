@@ -1,0 +1,405 @@
+# Information Architecture — derived from current docs.flytbase.com sitemap
+# This is the node taxonomy used for corpus tagging and placement suggestions.
+# Each node has a path (matching the URL slug) and child nodes.
+# When the new IA is ready, replace this file.
+
+ia_nodes:
+
+  - id: introduction
+    label: Introduction to FlytBase
+    path: /introduction-to-flytbase
+    children:
+      - id: flytbase-advantage
+        label: FlytBase Advantage
+        path: /introduction-to-flytbase/flytbase-advantage
+
+  - id: getting-started
+    label: Getting Started with Your FlytBase Account
+    path: /getting-started-with-your-flytbase-account
+    children:
+      - id: creating-profile
+        label: Creating a FlytBase Profile
+        path: /getting-started-with-your-flytbase-account/creating-a-flytbase-profile
+      - id: enterprise-sso
+        label: Enterprise Single Sign-On (SSO)
+        path: /getting-started-with-your-flytbase-account/enterprise-single-sign-on-sso
+      - id: creating-org
+        label: Creating an Organization
+        path: /getting-started-with-your-flytbase-account/creating-an-organization
+      - id: joining-org
+        label: Joining an Organization
+        path: /getting-started-with-your-flytbase-account/joining-an-organization
+      - id: managing-org
+        label: Managing Your Organization
+        path: /getting-started-with-your-flytbase-account/managing-your-organization
+      - id: roles-permissions
+        label: Roles and Permissions
+        path: /getting-started-with-your-flytbase-account/roles-and-permissions
+      - id: site-management
+        label: Site Management
+        path: /getting-started-with-your-flytbase-account/site-management
+      - id: private-cloud-storage
+        label: Setup Private Cloud Storage (AWS S3)
+        path: /getting-started-with-your-flytbase-account/setup-private-cloud-storage-aws-s3
+
+  - id: navigating
+    label: Navigating FlytBase
+    path: /navigating-flytbase
+    children:
+      - id: navigating-platform
+        label: Navigating Your FlytBase Platform
+        path: /navigating-flytbase/navigating-your-flytbase-platform
+
+  - id: maps-overlays
+    label: Maps and Overlays
+    path: /maps-and-overlays
+    children:
+      - id: maps
+        label: Maps on FlytBase
+        path: /maps-and-overlays/maps-on-flytbase
+      - id: map-overlays
+        label: Map Overlays
+        path: /maps-and-overlays/map-overlays
+
+  - id: device-management
+    label: Device Management
+    path: /device-management
+    children:
+      - id: dji-dock-3
+        label: DJI Dock 3 + FlytBase
+        path: /device-management/dji-dock-3-+-flytbase-the-future-of-autonomous-ops-starts-here
+      - id: add-setup-device
+        label: Add and Setup Your Device
+        path: /device-management/add-and-setup-your-device
+        children:
+          - id: register-dock-3
+            label: Register Your DJI Dock 3
+            path: /device-management/add-and-setup-your-device/register-your-dji-dock-3
+          - id: register-dock-1-2
+            label: Register Your DJI Dock 1 and 2
+            path: /device-management/add-and-setup-your-device/register-your-dji-dock-1-and-2
+          - id: register-hextronics
+            label: Register Your Hextronics Docks
+            path: /device-management/add-and-setup-your-device/register-your-hextronics-docks
+      - id: activating-subscription
+        label: Activating Device Subscription
+        path: /device-management/activating-device-subscription
+      - id: device-mgmt-hub
+        label: Device Management Hub
+        path: /device-management/device-management
+        children:
+          - id: dji-docks
+            label: DJI Docks
+            path: /device-management/device-management/dji-docks
+            children:
+              - id: dji-docks-overview
+                label: Overview
+                path: /device-management/device-management/dji-docks/overview
+              - id: dji-docks-maintenance
+                label: Device Maintenance
+                path: /device-management/device-management/dji-docks/device-maintenance
+              - id: dji-docks-diagnostics
+                label: Diagnostics
+                path: /device-management/device-management/dji-docks/diagnostics
+              - id: dji-docks-logs
+                label: Device Logs
+                path: /device-management/device-management/dji-docks/device-logs
+              - id: dji-docks-firmware
+                label: Firmware
+                path: /device-management/device-management/dji-docks/firmware
+              - id: dji-docks-settings
+                label: Device Settings
+                path: /device-management/device-management/dji-docks/device-settings
+                children:
+                  - id: drone-control
+                    label: Drone Control
+                    path: /device-management/device-management/dji-docks/device-settings/drone-control
+                  - id: cas
+                    label: Collision Avoidance Sensing (CAS)
+                    path: /device-management/device-management/dji-docks/device-settings/collision-avoidance-sensing-cas
+          - id: hextronics-docks
+            label: Hextronics Docks
+            path: /device-management/device-management/hextronics-docks
+            children:
+              - id: hex-first-flight
+                label: First Flight with Hextronics
+                path: /device-management/device-management/hextronics-docks/first-flight-with-hextronics-atlas-hextronics-universal
+              - id: hex-overview
+                label: Overview
+                path: /device-management/device-management/hextronics-docks/overview
+              - id: hex-diagnostics
+                label: Diagnostics
+                path: /device-management/device-management/hextronics-docks/diagnostics
+              - id: hex-settings-drone-dock
+                label: Settings — Drone and Dock
+                path: /device-management/device-management/hextronics-docks/settings-drone-and-dock
+              - id: hex-settings-failsafes
+                label: Settings — Failsafes
+                path: /device-management/device-management/hextronics-docks/settings-failsafes
+              - id: hex-precision-landing
+                label: Settings — Precision Landing
+                path: /device-management/device-management/hextronics-docks/settings-precision-landing
+      - id: airsense
+        label: AirSense
+        path: /device-management/airsense
+
+  - id: pre-flight
+    label: Pre-Flight Modules
+    path: /pre-flight-modules
+    children:
+      - id: failsafes
+        label: Learn More About Failsafes
+        path: /pre-flight-modules/learn-more-about-failsafes
+        children:
+          - id: emergency-landing
+            label: Emergency Landing
+            path: /pre-flight-modules/learn-more-about-failsafes/emergency-landing
+          - id: alternate-landing
+            label: Alternate Landing Location
+            path: /pre-flight-modules/learn-more-about-failsafes/alternate-landing-location
+          - id: drc-visibility
+            label: DRC Visibility
+            path: /pre-flight-modules/learn-more-about-failsafes/drc-visibility
+      - id: platform-settings
+        label: Platform Settings
+        path: /pre-flight-modules/platform-settings
+        children:
+          - id: preferences
+            label: Preferences
+            path: /pre-flight-modules/platform-settings/preferences
+          - id: flight-configuration
+            label: Flight Configuration
+            path: /pre-flight-modules/platform-settings/flight-configuration
+          - id: key-bindings
+            label: Key Bindings
+            path: /pre-flight-modules/platform-settings/key-bindings
+          - id: checklist
+            label: Checklist
+            path: /pre-flight-modules/platform-settings/checklist
+          - id: privacy
+            label: Privacy
+            path: /pre-flight-modules/platform-settings/privacy
+      - id: planning
+        label: Planning
+        path: /pre-flight-modules/planning
+        children:
+          - id: mission-planning
+            label: Mission Planning
+            path: /pre-flight-modules/planning/mission-planning
+            children:
+              - id: path-mission
+                label: Path Mission
+                path: /pre-flight-modules/planning/mission-planning/path-mission
+              - id: grid-mission
+                label: Grid Mission
+                path: /pre-flight-modules/planning/mission-planning/grid-mission
+              - id: import-kml
+                label: Importing a Mission Using KML File
+                path: /pre-flight-modules/planning/mission-planning/importing-a-mission-using-kml-file
+              - id: wpml-mission
+                label: WPML Mission
+                path: /pre-flight-modules/planning/mission-planning/wpml-mission
+              - id: mission-breakpoint
+                label: Mission Breakpoint
+                path: /pre-flight-modules/planning/mission-planning/mission-breakpoint
+          - id: mission-management
+            label: Mission Management
+            path: /pre-flight-modules/planning/mission-management
+          - id: mission-scheduler
+            label: Mission Scheduler
+            path: /pre-flight-modules/planning/mission-scheduler
+      - id: 3d-mission-planning
+        label: 3D Mission Planning
+        path: /pre-flight-modules/3d-mission-planning
+        children:
+          - id: copy-paste-waypoints
+            label: Copy Paste Waypoints Across Missions
+            path: /pre-flight-modules/3d-mission-planning/copy-paste-waypoints-across-missions
+      - id: zones
+        label: Zones
+        path: /pre-flight-modules/zones
+
+  - id: terrain-altitude
+    label: Terrain and Altitude Visualization
+    path: /terrain-and-altitude-visualization
+    children:
+      - id: terrain-viz
+        label: Terrain Visualization
+        path: /terrain-and-altitude-visualization/terrain-visualization
+        children:
+          - id: terrain-missions
+            label: Terrain Visualization for Missions
+            path: /terrain-and-altitude-visualization/terrain-visualization/terrain-visualization-for-missions
+          - id: terrain-gtl
+            label: Terrain Visualization for Go To Location (GTL)
+            path: /terrain-and-altitude-visualization/terrain-visualization/terrain-visualization-for-go-to-location-gtl
+      - id: inflight-altitude-viz
+        label: In-Flight Altitude Visualization
+        path: /terrain-and-altitude-visualization/in-flight-altitude-visualization
+
+  - id: in-flight
+    label: In-Flight Modules
+    path: /in-flight-modules
+    children:
+      - id: first-flight
+        label: Setting Up Your First Flight
+        path: /in-flight-modules/setting-up-your-first-flight
+      - id: flight-execution
+        label: Flight Execution
+        path: /in-flight-modules/flight-execution
+        children:
+          - id: gtl
+            label: Go To Location (GTL)
+            path: /in-flight-modules/flight-execution/go-to-location-gtl
+      - id: annotations
+        label: Annotations
+        path: /in-flight-modules/annotations
+        children:
+          - id: annotation-groups
+            label: Organizing and Customizing Annotations Groups
+            path: /in-flight-modules/annotations/organizing-and-customizing-annotations-groups
+          - id: annotation-import
+            label: Importing Annotations from KML and KMZ
+            path: /in-flight-modules/annotations/importing-annotations-from-kml-and-kmz
+          - id: annotation-customize
+            label: Customizing Annotations
+            path: /in-flight-modules/annotations/customizing-annotations-fine-tune-annotations-for-operational-precision
+      - id: flight-operations
+        label: How to Manage Your Flight Operations
+        path: /in-flight-modules/how-to-manage-your-flight-operations
+        children:
+          - id: multi-view-dashboard
+            label: Multi-View Dashboard
+            path: /in-flight-modules/how-to-manage-your-flight-operations/multi-view-dashboard
+            children:
+              - id: fleet-monitoring
+                label: Real-Time Fleet Monitoring
+                path: /in-flight-modules/how-to-manage-your-flight-operations/multi-view-dashboard/real-time-fleet-monitoring
+              - id: live-video-feed
+                label: Live Video Feed
+                path: /in-flight-modules/how-to-manage-your-flight-operations/multi-view-dashboard/live-video-feed
+              - id: 3d-map-viz
+                label: Interactive 3D Map Visualization
+                path: /in-flight-modules/how-to-manage-your-flight-operations/multi-view-dashboard/interactive-3d-map-visualization
+          - id: fleet-management
+            label: Fleet Management
+            path: /in-flight-modules/how-to-manage-your-flight-operations/fleet-management
+          - id: drone-controls
+            label: How to Control Your Drone
+            path: /in-flight-modules/how-to-manage-your-flight-operations/how-to-control-your-drone
+            children:
+              - id: manual-drone-controls
+                label: Manual Drone Controls
+                path: /in-flight-modules/how-to-manage-your-flight-operations/how-to-control-your-drone/manual-drone-controls
+              - id: drone-access-control
+                label: Drone Access Control
+                path: /in-flight-modules/how-to-manage-your-flight-operations/how-to-control-your-drone/drone-access-control
+          - id: payload-controls
+            label: Payload Controls
+            path: /in-flight-modules/how-to-manage-your-flight-operations/payload-controls
+            children:
+              - id: manual-payload-controls
+                label: Manual Payload Controls
+                path: /in-flight-modules/how-to-manage-your-flight-operations/payload-controls/manual-payload-controls
+              - id: payload-access-control
+                label: Payload Access Control
+                path: /in-flight-modules/how-to-manage-your-flight-operations/payload-controls/payload-access-control
+              - id: nighttime-visibility
+                label: Nighttime Visibility and Imaging Settings
+                path: /in-flight-modules/how-to-manage-your-flight-operations/payload-controls/nighttime-visibility-and-imaging-settings
+      - id: video-wall
+        label: Video Wall
+        path: /in-flight-modules/video-wall
+      - id: alerts-notifications
+        label: Alerts and Notifications
+        path: /in-flight-modules/alerts-and-notifications
+      - id: speaker-spotlight
+        label: Speaker and Spotlight
+        path: /in-flight-modules/speaker-and-spotlight
+      - id: live-mission-recorder
+        label: Live Mission Recorder
+        path: /in-flight-modules/live-mission-recorder
+      - id: guest-sharing
+        label: Guest Sharing with Maps
+        path: /in-flight-modules/guest-sharing-with-maps
+      - id: poi
+        label: Point of Interest
+        path: /in-flight-modules/point-of-interest
+
+  - id: avss-parachute
+    label: AVSS Parachute Integration
+    path: /avss-parachute-integration
+
+  - id: post-flight
+    label: Post-Flight Modules
+    path: /post-flight-modules
+    children:
+      - id: flight-logs
+        label: Reviewing Your Flight Logs
+        path: /post-flight-modules/reviewing-your-flight-logs
+      - id: gallery
+        label: Gallery
+        path: /post-flight-modules/gallery
+      - id: reports
+        label: Reports
+        path: /post-flight-modules/reports
+
+  - id: flinks-flows
+    label: Flinks and Flows
+    path: /flinks-and-flows
+    children:
+      - id: flinks
+        label: Flinks
+        path: /flinks-and-flows/flinks
+        children:
+          - id: flinks-alarms
+            label: Flinks Alarms
+            path: /flinks-and-flows/flinks/flinks-alarms
+          - id: flinks-live-streaming
+            label: Flinks Live Streaming
+            path: /flinks-and-flows/flinks/flinks-live-streaming
+            children:
+              - id: rtsp-streaming
+                label: Introduction to Secured RTSP Streaming
+                path: /flinks-and-flows/flinks/flinks-live-streaming/introduction-to-secured-rtsp-streaming
+                children:
+                  - id: rtsp-security
+                    label: Security and Network Considerations
+                    path: /flinks-and-flows/flinks/flinks-live-streaming/introduction-to-secured-rtsp-streaming/security-and-network-considerations
+                  - id: rtsp-setup
+                    label: Setting Up Authenticated RTSP Streaming
+                    path: /flinks-and-flows/flinks/flinks-live-streaming/introduction-to-secured-rtsp-streaming/setting-up-authenticated-rtsp-streaming
+          - id: flinks-data-processing
+            label: Flinks Data Processing
+            path: /flinks-and-flows/flinks/flinks-data-processing
+            children:
+              - id: dronedeploy
+                label: Mapping Using DroneDeploy
+                path: /flinks-and-flows/flinks/flinks-data-processing/mapping-using-dronedeploy
+              - id: pix4d
+                label: Mapping Using Pix4D
+                path: /flinks-and-flows/flinks/flinks-data-processing/mapping-using-pix4d
+              - id: strayos
+                label: Mapping Using StrayOS
+                path: /flinks-and-flows/flinks/flinks-data-processing/mapping-using-strayos
+      - id: flows
+        label: Flows
+        path: /flinks-and-flows/flows
+        children:
+          - id: flows-alarms
+            label: Flows Alarms
+            path: /flinks-and-flows/flows/flows-alarms
+          - id: flows-notifications
+            label: Flows Operational Notifications
+            path: /flinks-and-flows/flows/flows-operational-notifications
+
+  - id: discover-more
+    label: Discover More
+    path: /discover-more
+    children:
+      - id: faqs
+        label: General FAQs
+        path: /discover-more/general-faqs
+      - id: contact-support
+        label: Contact Technical Support
+        path: /discover-more/contact-technical-support

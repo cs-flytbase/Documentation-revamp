@@ -1,0 +1,21 @@
+# Core
+anthropic>=0.40.0
+pinecone>=9.0.0
+openai>=1.0.0              # for embeddings (text-embedding-3-small)
+
+# Web scraping
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+lxml>=5.0.0
+
+# Corpus processing
+tiktoken>=0.7.0            # token counting for chunking
+sentence-transformers>=3.0.0  # cross-encoder reranking
+
+# Utilities
+python-dotenv>=1.0.0
+pyyaml>=6.0.0
+gitpython>=3.1.0
+
+# GitHub
+PyGithub>=2.0.0

@@ -1,0 +1,27 @@
+# Environment — never commit API keys
+.env
+
+# Virtual environment
+.venv/
+venv/
+
+# Pipeline outputs
+output/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Mailbox (runtime state)
+mailbox/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
