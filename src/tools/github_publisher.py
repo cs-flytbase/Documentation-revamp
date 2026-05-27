@@ -19,7 +19,7 @@ from src.config import GITHUB_TOKEN
 
 DOCS_REPO = "FlytBaseAILabs/flytbase-docs"
 RELEASES_REPO = "FlytBaseAILabs/flytbase-releases"
-BASE_BRANCH = "main"
+BASE_BRANCH = "dushyant"
 
 
 class GitHubPublisher:
