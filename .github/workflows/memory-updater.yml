@@ -1,17 +1,23 @@
 name: Memory Updater
 
 on:
+  # Triggered by feedback-trigger.yml in flytbase-docs and flytbase-releases
+  repository_dispatch:
+    types: [pr-feedback]
+
+  # Also allows direct /feedback comments on this repo's PRs
   issue_comment:
     types: [created]
 
 jobs:
   update-memory:
-    # Only run on PR comments starting with /feedback
-    if: |
-      github.event.issue.pull_request != null &&
-      startsWith(github.event.comment.body, '/feedback')
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    # For issue_comment: only run on PR comments
+    if: |
+      github.event_name == 'repository_dispatch' ||
+      github.event.issue.pull_request != null
 
     steps:
       - name: Checkout repo
@@ -44,12 +50,17 @@ jobs:
       - name: Extract feedback text
         id: feedback
         run: |
-          # Strip the /feedback prefix and trim whitespace
-          COMMENT="${{ github.event.comment.body }}"
-          FEEDBACK="${COMMENT#/feedback}"
-          FEEDBACK="${FEEDBACK#"${FEEDBACK%%[![:space:]]*}"}"
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            FEEDBACK="${{ github.event.client_payload.feedback }}"
+            SOURCE="PR #${{ github.event.client_payload.pr_number }} in ${{ github.event.client_payload.source_repo }} by ${{ github.event.client_payload.commenter }}"
+          else
+            COMMENT="${{ github.event.comment.body }}"
+            FEEDBACK="$COMMENT"
+            SOURCE="PR #${{ github.event.issue.number }} in this repo"
+          fi
           echo "text=$FEEDBACK" >> $GITHUB_OUTPUT
-          echo "Feedback: $FEEDBACK"
+          echo "source=$SOURCE" >> $GITHUB_OUTPUT
+          echo "Feedback from $SOURCE: $FEEDBACK"
 
       - name: Run memory updater
         run: |
@@ -60,17 +71,6 @@ jobs:
           git config user.name "FlytBase Doc Pipeline"
           git config user.email "docs-pipeline@flytbase.com"
           git add memory/
-          git diff --staged --quiet && echo "No memory changes" || \
-            git commit -m "memory: update from PR #${{ github.event.issue.number }} feedback"
+          git diff --staged --quiet && echo "No memory changes to commit" || \
+            git commit -m "memory: update from ${{ steps.feedback.outputs.source }}"
           git push
-
-      - name: Reply to comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: '✅ Feedback received and saved to memory. The pipeline will apply this correction on the next run.'
-            })
