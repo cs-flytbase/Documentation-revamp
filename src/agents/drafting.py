@@ -49,25 +49,48 @@ Voice rules:
 DOC PAGE — operator reference
 ═══════════════════════════════════════════════════════════
 
-Purpose: Tell the operator exactly how to use it. Steps, configuration, edge cases,
-what happens if something goes wrong, constraints.
+Purpose: Tell the operator exactly how to use it. This is the reference document they
+come back to after reading the release note. It must be COMPREHENSIVE — every detail,
+every edge case, every constraint from the PM doc must be here.
+
+The doc page must be LONG. Minimum 1500 words. If the PM doc has rich detail, the doc
+page must reflect that. Do not summarize — expand. A person reading only the doc page
+should be able to fully understand and use the feature without reading anything else.
 
 Structure:
 1. Frontmatter with description
 2. H1 title
-3. Overview (2-3 sentences max — what it is, one line on why)
-4. Prerequisites
-5. Step-by-step configuration (numbered, with bold action verbs, sub-bullets for details)
-   Place screenshots inline after the step they illustrate.
-6. Constraints table
-7. Hardware compatibility table
-8. Edge cases / troubleshooting (if the PM doc mentions any)
-9. Related pages
+3. Overview — NOT just 2-3 sentences. Write a full paragraph (4-6 sentences) explaining:
+   - What the feature does
+   - Why it exists (what problem it solves)
+   - How it fits into the broader product workflow
+   - Who should use it and when
+4. How It Works — a dedicated section explaining the underlying mechanism in plain English.
+   Not steps — conceptual understanding. What happens under the hood when the operator
+   uses this feature? What does the system do with the input?
+5. Prerequisites — what needs to be set up before using this feature
+6. Step-by-step configuration — numbered steps with bold action verbs.
+   Each step must have:
+   - The action (what to click/select/fill)
+   - What happens as a result
+   - Any sub-steps or options available
+   - Screenshot placed immediately after the step it illustrates
+   Do NOT compress multiple actions into one step. Keep steps atomic.
+7. Constraints & Limitations — full table AND a paragraph explaining each constraint
+   in context. Don't just list them — explain WHY each constraint exists if the PM doc
+   mentions it.
+8. Hardware compatibility table
+9. Edge Cases & Troubleshooting — cover every edge case the PM doc mentions.
+   Format as: problem → cause → solution.
+10. Related pages
 
 Voice rules:
 - Professional, instructional, direct. Imperative for steps.
 - "Navigate to", "Click", "Select" — not "you should navigate to".
-- No narrative storytelling. Get to the point.
+- No narrative storytelling in steps. But the Overview and How It Works sections
+  should read as proper explanatory prose, not bullets.
+- Every detail from the PM doc must appear somewhere in the doc page. Nothing is
+  too minor to include if the PM doc mentioned it.
 
 ═══════════════════════════════════════════════════════════
 IMAGE PLACEMENT RULES
@@ -101,7 +124,7 @@ CRITICAL REQUIREMENTS
    Count the PM doc's H2 headings. Your release note must cover ALL of them.
 2. EVERY asset must be embedded with ![alt](assets/filename) in BOTH outputs.
 3. YouTube link MUST be the FIRST thing after the H1 title in the release note.
-4. Release note must be 3000+ characters. Doc page must be 1500+ characters.
+4. Release note must be 3000+ characters. Doc page must be 4000+ characters.
 5. Do NOT genericize. If the PM doc says "a water-filled well gives off the
    same thermal signature as a shallow pond" — use those exact words.
 
@@ -255,7 +278,7 @@ CHECKLIST before you respond:
 [ ] Release note covers ALL H2 sections from PM doc
 [ ] YouTube embed is the FIRST thing after H1 in release note
 [ ] Every asset filename appears in BOTH release note and doc page
-[ ] Release note is 3000+ chars, doc page is 1500+ chars
+[ ] Release note is 3000+ chars, doc page is 4000+ chars
 [ ] Real-world examples from PM doc are preserved word-for-word
 [ ] Hardware compatibility table is included
 [ ] Constraints table is included
@@ -302,8 +325,8 @@ CHECKLIST before you respond:
 
         if len(release_content) < 3000:
             warnings.append(f"Release note too short ({len(release_content)} chars, need 3000+)")
-        if len(doc_content) < 1500:
-            warnings.append(f"Doc page too short ({len(doc_content)} chars, need 1500+)")
+        if len(doc_content) < 4000:
+            warnings.append(f"Doc page too short ({len(doc_content)} chars, need 4000+)")
 
         pm_headings = re.findall(r'^##\s+\*?\*?(.+?)\*?\*?\s*$', pm_doc, re.MULTILINE)
         for heading in pm_headings:
