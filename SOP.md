@@ -49,6 +49,7 @@ input_bundles/
 └── your-feature-name/
     ├── pm_doc.md
     ├── youtube_link.txt
+    ├── transcript.md          ← optional but recommended (Clueso transcript)
     └── assets/
         ├── feature-name-screenshot-1.png
         ├── feature-name-screenshot-2.png
@@ -80,6 +81,31 @@ Contents of `youtube_link.txt`:
 ```
 https://www.youtube.com/watch?v=YOUR_VIDEO_ID
 ```
+
+**YouTube link file:**
+- Must be named exactly: `youtube_link.txt`
+- Contains only the full YouTube URL, nothing else
+- ❌ Wrong: `video.txt`, `youtube.txt`, `link.txt`
+- ✅ Correct: `youtube_link.txt`
+
+Contents of `youtube_link.txt`:
+```
+https://www.youtube.com/watch?v=YOUR_VIDEO_ID
+```
+
+**Clueso transcript (optional but recommended):**
+- Must be named exactly: `transcript.md` or `transcript.txt`
+- This is the transcript exported from Clueso after recording your feature demo video
+- The pipeline uses it to extract detailed step-by-step instructions, exact UI element names, and edge cases that may not be in the PM doc
+- The more detailed the transcript, the richer the generated documentation
+- ❌ Wrong: `clueso.txt`, `video-transcript.md`, `demo-transcript.txt`
+- ✅ Correct: `transcript.md` or `transcript.txt`
+
+How to get the transcript from Clueso:
+1. Open your Clueso project
+2. Go to the transcript/captions section
+3. Export as `.txt` or copy the full text
+4. Save it as `transcript.md` inside your feature folder
 
 **Assets folder:**
 - Must be named exactly: `assets`
@@ -233,13 +259,14 @@ You do not need any special command or prefix — just write a normal comment ex
 
 ## Quick Reference — File Naming Cheatsheet
 
-| File / Folder | Required Name | Example |
-|---|---|---|
-| Feature folder | `your-feature-name` (lowercase, hyphens) | `site-pointers` |
-| PM document | `pm_doc.md` | `pm_doc.md` |
-| YouTube link | `youtube_link.txt` | `youtube_link.txt` |
-| Assets folder | `assets` | `assets` |
-| Asset files | `feature-name-description.ext` | `site-pointers-workflow.gif` |
+| File / Folder | Required Name | Required? | Example |
+|---|---|---|---|
+| Feature folder | `your-feature-name` (lowercase, hyphens) | ✅ Yes | `site-pointers` |
+| PM document | `pm_doc.md` | ✅ Yes | `pm_doc.md` |
+| YouTube link | `youtube_link.txt` | ✅ Yes | `youtube_link.txt` |
+| Clueso transcript | `transcript.md` or `transcript.txt` | ⭐ Recommended | `transcript.md` |
+| Assets folder | `assets` | ✅ Yes | `assets` |
+| Asset files | `feature-name-description.ext` | ✅ Yes | `site-pointers-workflow.gif` |
 
 ---
 
@@ -250,6 +277,7 @@ input_bundles/
 └── site-pointers/                    ← feature folder (your feature name)
     ├── pm_doc.md                     ← PM document (always this name)
     ├── youtube_link.txt              ← YouTube URL (always this name)
+    ├── transcript.md                 ← Clueso transcript (recommended)
     └── assets/                       ← assets folder (always this name)
         ├── site-pointers-empty-state.png
         ├── site-pointers-add-pointer-modal.png
@@ -260,6 +288,9 @@ input_bundles/
 ---
 
 ## FAQs
+
+**Q: Is the Clueso transcript mandatory?**
+No, it is optional. But it significantly improves the quality of the generated documentation — especially the step-by-step sections and the How It Works explanation. If you have a Clueso recording for the feature, always export the transcript and include it.
 
 **Q: What if I don't have a YouTube link yet?**
 Create the `youtube_link.txt` file but leave it empty. The pipeline will skip the embed and generate content without it.

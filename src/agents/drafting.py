@@ -242,17 +242,33 @@ class DraftingAgent(BaseAgent):
         asset_filenames: list[str],
         youtube_link: str = "",
         release_month: str = "",
+        transcript: str = "",
     ) -> dict:
         claude_md = self._load_claude_md()
         memory_context = self._load_relevant_memory()
         asset_map = self._build_asset_map(pm_doc, asset_filenames, vision_output)
+
+        transcript_section = ""
+        if transcript:
+            transcript_section = f"""
+--- CLUESO VIDEO TRANSCRIPT ---
+This is the transcript from the feature demo video. It contains spoken explanations,
+step-by-step walkthroughs, and real operator context. Use it to:
+- Fill in procedural details that the PM doc may have skipped
+- Extract exact UI element names and navigation paths as spoken by the presenter
+- Pick up on edge cases or tips mentioned verbally
+- Add depth to the How It Works and step-by-step sections
+
+{transcript}
+--- END TRANSCRIPT ---
+"""
 
         user_message = f"""Produce the release note and doc page from this PM document.
 
 --- PM DOCUMENT (use ALL of it, do NOT skip sections) ---
 {pm_doc}
 --- END PM DOCUMENT ---
-
+{transcript_section}
 --- RESEARCH OUTPUT ---
 {json.dumps(research_output, indent=2)}
 --- END RESEARCH OUTPUT ---
@@ -282,7 +298,8 @@ CHECKLIST before you respond:
 [ ] Real-world examples from PM doc are preserved word-for-word
 [ ] Hardware compatibility table is included
 [ ] Constraints table is included
-[ ] Steps have bold headers with full detail paragraphs"""
+[ ] Steps have bold headers with full detail paragraphs
+[ ] Transcript details (if provided) are incorporated into steps and How It Works"""
 
         self.conversation_history = [{"role": "user", "content": user_message}]
         response = self.run(user_message)

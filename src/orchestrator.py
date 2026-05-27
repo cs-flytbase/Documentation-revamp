@@ -49,6 +49,12 @@ def validate_input_bundle(bundle_path: str) -> dict:
     else:
         result["warnings"].append("No youtube_link.txt found")
 
+    # Find Clueso transcript (optional)
+    transcript_path = path / "transcript.md"
+    if not transcript_path.exists():
+        transcript_path = path / "transcript.txt"
+    result["transcript"] = transcript_path.read_text().strip() if transcript_path.exists() else ""
+
     # Find assets
     asset_dir = path / "assets"
     search_dir = asset_dir if asset_dir.exists() else path
@@ -105,6 +111,7 @@ def run_pipeline(bundle_path: str) -> dict:
     print(f"  PM doc: {bundle['pm_doc_path']} ({len(pm_doc)} chars)")
     print(f"  Assets: {len(bundle['asset_paths'])} files — {bundle['asset_filenames']}")
     print(f"  YouTube: {bundle['youtube_link'] or 'None'}")
+    print(f"  Transcript: {len(bundle['transcript'])} chars" if bundle['transcript'] else "  Transcript: None")
 
     # Step 2: Load IA summary
     ia_summary = load_ia_summary()
@@ -153,7 +160,7 @@ def run_pipeline(bundle_path: str) -> dict:
     # Step 4: Drafting — pass EVERYTHING
     print("\n[Step 4] Running Drafting agent...")
     print(f"  Passing: full PM doc ({len(pm_doc)} chars), {len(vision_result)} vision descriptions,")
-    print(f"           {len(bundle['asset_filenames'])} asset filenames, YouTube: {'Yes' if bundle['youtube_link'] else 'No'}")
+    print(f"           {len(bundle['asset_filenames'])} asset filenames, YouTube: {'Yes' if bundle['youtube_link'] else 'No'}, Transcript: {'Yes' if bundle['transcript'] else 'No'}")
 
     release_month = datetime.now().strftime("%B-%Y").lower()
 
@@ -165,6 +172,7 @@ def run_pipeline(bundle_path: str) -> dict:
         asset_filenames=bundle["asset_filenames"],
         youtube_link=bundle["youtube_link"],
         release_month=release_month,
+        transcript=bundle["transcript"],
     )
 
     if "error" in draft_result:
