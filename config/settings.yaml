@@ -23,8 +23,8 @@ models_anthropic:
 # Pinecone settings
 pinecone:
   index_name: flytbase-docs
-  embedding_model: all-MiniLM-L6-v2   # local, free, sentence-transformers
-  embedding_dimension: 384
+  embedding_model: all-mpnet-base-v2   # local, free, 768-dim, better recall
+  embedding_dimension: 768
   metric: dotproduct     # dotproduct works best with normalized embeddings for hybrid search
   cloud: aws
   region: us-east-1

@@ -7,11 +7,12 @@ One-shot agent. Receives PM doc text, returns:
 """
 
 import json
+from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
 
 from src.agents.base import BaseAgent
-from src.config import SETTINGS
+from src.config import SETTINGS, PROJECT_ROOT
 from src.tools.corpus_store import search
 
 SYSTEM_PROMPT = """You are the Research Agent for the FlytBase documentation pipeline.
@@ -178,6 +179,14 @@ PM Document:
         corpus_context = format_results(corpus_results, 20)
         sweep_context = format_results(sweep_results, 15)
 
+        # Step 5.5: Load placement corrections from memory
+        placement_memory = ""
+        placement_path = PROJECT_ROOT / "memory" / "placement_corrections.md"
+        if placement_path.exists():
+            text = placement_path.read_text().strip()
+            if "No corrections yet" not in text:
+                placement_memory = f"\n--- PLACEMENT CORRECTIONS (learned from reviewer feedback) ---\n{text}\n--- END CORRECTIONS ---\n"
+
         # Step 6: LLM analysis
         analysis_prompt = f"""Here is the PM document for a new feature/update:
 
@@ -202,7 +211,7 @@ Here are ALL pages found in the "{product_area}" product area (URL/label match):
 
 Sub-queries used: {json.dumps(sub_queries)}
 Product area identified: {product_area}
-
+{placement_memory}
 IMPORTANT: The product area sweep above shows every existing page related to {product_area}.
 Check ALL of them for impacted_pages — not just the ones that scored highest semantically.
 Any page that covers this feature area and would need a cross-reference or content update must be included.

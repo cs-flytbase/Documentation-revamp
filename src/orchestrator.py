@@ -5,6 +5,7 @@ Usage:
 """
 
 import json
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
@@ -16,31 +17,55 @@ from src.config import PROJECT_ROOT, SETTINGS
 from src.agents.research import ResearchAgent
 from src.agents.vision import VisionAgent
 from src.agents.drafting import DraftingAgent
+from src.agents.verification import VerificationAgent
 
 
 def validate_input_bundle(bundle_path: str) -> dict:
-    """Validate the input bundle has everything needed."""
+    """Validate the input bundle. Flexible naming — accepts any .md as source doc."""
     path = Path(bundle_path)
     result = {
         "valid": True,
         "pm_doc_path": None,
         "youtube_link": "",
+        "transcript": "",
         "asset_paths": [],
         "asset_filenames": [],
         "errors": [],
         "warnings": [],
     }
 
-    # Find PM doc
-    pm_candidates = list(path.glob("pm_doc.*")) + list(path.glob("pm_doc*.*"))
-    if not pm_candidates:
-        pm_candidates = list(path.glob("*.md")) + list(path.glob("*.txt"))
+    # Find source document — flexible naming
+    # Priority: pm_doc.md > doc.md > any .md that isn't transcript/readme
+    pm_path = path / "pm_doc.md"
+    doc_path = path / "doc.md"
 
-    if pm_candidates:
-        result["pm_doc_path"] = str(pm_candidates[0])
+    if pm_path.exists():
+        result["pm_doc_path"] = str(pm_path)
+    elif doc_path.exists():
+        result["pm_doc_path"] = str(doc_path)
     else:
-        result["valid"] = False
-        result["errors"].append("No PM document found")
+        # Fallback: find the largest .md file that isn't transcript or readme
+        md_files = [
+            f for f in path.glob("*.md")
+            if f.stem.lower() not in ("transcript", "readme")
+        ]
+        if md_files:
+            # Pick the largest one
+            largest = max(md_files, key=lambda f: f.stat().st_size)
+            result["pm_doc_path"] = str(largest)
+            result["warnings"].append(f"Using '{largest.name}' as source document (no pm_doc.md found)")
+        else:
+            # Try .txt files
+            txt_files = [
+                f for f in path.glob("*.txt")
+                if f.stem.lower() not in ("youtube_link",)
+            ]
+            if txt_files:
+                largest = max(txt_files, key=lambda f: f.stat().st_size)
+                result["pm_doc_path"] = str(largest)
+            else:
+                result["valid"] = False
+                result["errors"].append("No source document found (.md or .txt)")
 
     # Find YouTube link
     yt_file = path / "youtube_link.txt"
@@ -50,21 +75,24 @@ def validate_input_bundle(bundle_path: str) -> dict:
         result["warnings"].append("No youtube_link.txt found")
 
     # Find Clueso transcript (optional)
-    transcript_path = path / "transcript.md"
-    if not transcript_path.exists():
-        transcript_path = path / "transcript.txt"
-    result["transcript"] = transcript_path.read_text().strip() if transcript_path.exists() else ""
+    for transcript_name in ["transcript.md", "transcript.txt"]:
+        transcript_path = path / transcript_name
+        if transcript_path.exists():
+            result["transcript"] = transcript_path.read_text().strip()
+            break
 
-    # Find assets
+    # Find assets — support images, GIFs, and videos
     asset_dir = path / "assets"
     search_dir = asset_dir if asset_dir.exists() else path
-    for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"):
+    for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.mp4"):
         result["asset_paths"].extend([str(p) for p in search_dir.glob(ext)])
 
+    # Sort alphabetically for deterministic ordering
+    result["asset_paths"].sort(key=lambda p: Path(p).name)
     result["asset_filenames"] = [Path(p).name for p in result["asset_paths"]]
 
     if not result["asset_paths"]:
-        result["warnings"].append("No image/GIF assets found")
+        result["warnings"].append("No image/GIF/video assets found")
 
     return result
 
@@ -88,6 +116,34 @@ def load_ia_summary() -> str:
     return "\n".join(lines)
 
 
+def fetch_exemplar(research_result: dict) -> str:
+    """Fetch a similar existing page from corpus to use as a style exemplar."""
+    from src.tools.corpus_store import search as corpus_search
+    from sentence_transformers import SentenceTransformer
+
+    feature_summary = research_result.get("feature_summary", "")
+    if not feature_summary:
+        return ""
+
+    try:
+        model = SentenceTransformer(SETTINGS["pinecone"]["embedding_model"])
+        embedding = model.encode(feature_summary, normalize_embeddings=True).tolist()
+        results = corpus_search(embedding, top_k=3)
+
+        # Pick the longest chunk as the exemplar (more detailed = better example)
+        best = None
+        best_len = 0
+        for r in results:
+            content = r["metadata"].get("content", "")
+            if len(content) > best_len and r["metadata"].get("source_type") != "release":
+                best = content
+                best_len = len(content)
+
+        return best or ""
+    except Exception:
+        return ""
+
+
 def run_pipeline(bundle_path: str) -> dict:
     """Run the full documentation generation pipeline."""
     print("=" * 60)
@@ -108,10 +164,10 @@ def run_pipeline(bundle_path: str) -> dict:
         print(f"  WARNING: {w}")
 
     pm_doc = Path(bundle["pm_doc_path"]).read_text()
-    print(f"  PM doc: {bundle['pm_doc_path']} ({len(pm_doc)} chars)")
+    print(f"  Source doc: {bundle['pm_doc_path']} ({len(pm_doc)} chars)")
     print(f"  Assets: {len(bundle['asset_paths'])} files — {bundle['asset_filenames']}")
     print(f"  YouTube: {bundle['youtube_link'] or 'None'}")
-    print(f"  Transcript: {len(bundle['transcript'])} chars" if bundle['transcript'] else "  Transcript: None")
+    print(f"  Transcript: {len(bundle['transcript'])} chars" if bundle["transcript"] else "  Transcript: None")
 
     # Step 2: Load IA summary
     ia_summary = load_ia_summary()
@@ -130,10 +186,11 @@ def run_pipeline(bundle_path: str) -> dict:
 
         if bundle["asset_paths"]:
             vision_agent = VisionAgent()
+            # Pass FULL pm_doc — not truncated
             futures[executor.submit(
                 vision_agent.describe_all_assets,
                 bundle["asset_paths"],
-                pm_doc[:1000],
+                pm_doc,
             )] = "vision"
 
         for future in as_completed(futures):
@@ -151,15 +208,24 @@ def run_pipeline(bundle_path: str) -> dict:
                     vision_result = result
                     print(f"  Vision agent done. Described {len(result)} assets.")
                     for v in result:
-                        print(f"    - {v.get('file_name', '?')}: {v.get('description', '')[:80]}...")
+                        section = v.get("section_heading", "?")
+                        print(f"    - {v.get('file_name', '?')} → {section}: {v.get('description', '')[:60]}...")
             except Exception as e:
                 print(f"  {agent_name} agent FAILED: {e}")
                 if agent_name == "research":
                     return {"status": "failed", "errors": [f"Research agent failed: {e}"]}
 
-    # Step 4: Drafting — pass EVERYTHING
-    print("\n[Step 4] Running Drafting agent...")
-    print(f"  Passing: full PM doc ({len(pm_doc)} chars), {len(vision_result)} vision descriptions,")
+    # Step 3.5: Fetch exemplar from corpus
+    print("\n[Step 3.5] Fetching exemplar page from corpus...")
+    exemplar = fetch_exemplar(research_result)
+    if exemplar:
+        print(f"  Found exemplar ({len(exemplar)} chars)")
+    else:
+        print("  No suitable exemplar found")
+
+    # Step 4: Drafting — split into two calls
+    print("\n[Step 4] Running Drafting agent (two separate calls)...")
+    print(f"  Passing: full source doc ({len(pm_doc)} chars), {len(vision_result)} vision descriptions,")
     print(f"           {len(bundle['asset_filenames'])} asset filenames, YouTube: {'Yes' if bundle['youtube_link'] else 'No'}, Transcript: {'Yes' if bundle['transcript'] else 'No'}")
 
     release_month = datetime.now().strftime("%B-%Y").lower()
@@ -173,11 +239,13 @@ def run_pipeline(bundle_path: str) -> dict:
         youtube_link=bundle["youtube_link"],
         release_month=release_month,
         transcript=bundle["transcript"],
+        exemplar=exemplar,
     )
 
     if "error" in draft_result:
         print(f"  Drafting agent FAILED: {draft_result['error']}")
         raw_path = PROJECT_ROOT / "output" / "draft_raw_response.txt"
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
         raw_path.write_text(draft_result.get("raw_response", ""))
         print(f"  Raw response saved to {raw_path}")
         return {"status": "failed", "errors": [draft_result["error"]], "raw": draft_result}
@@ -190,21 +258,47 @@ def run_pipeline(bundle_path: str) -> dict:
             print(f"    ⚠ {w}")
 
     print("  Drafting agent done.")
-    print(f"    Release note: {draft_result.get('release_note', {}).get('filename', 'N/A')}")
-    rc = draft_result.get('release_note', {}).get('content', '')
-    print(f"    Release note length: {len(rc)} chars")
-    print(f"    Doc page: {draft_result.get('doc_page', {}).get('filename', 'N/A')}")
-    dc = draft_result.get('doc_page', {}).get('content', '')
-    print(f"    Doc page length: {len(dc)} chars")
+    rc = draft_result.get("release_note", {}).get("content", "")
+    dc = draft_result.get("doc_page", {}).get("content", "")
+    print(f"    Release note: {draft_result.get('release_note', {}).get('filename', 'N/A')} ({len(rc)} chars)")
+    print(f"    Doc page: {draft_result.get('doc_page', {}).get('filename', 'N/A')} ({len(dc)} chars)")
     print(f"    Impacted page edits: {len(draft_result.get('impacted_page_edits', []))}")
 
-    # Step 5: Write outputs
-    print("\n[Step 5] Writing outputs...")
+    # Step 5: Verification — fact-check against sources
+    print("\n[Step 5] Running Verification agent...")
+    verifier = VerificationAgent()
+    verification_result = verifier.verify(
+        release_note_content=rc,
+        doc_page_content=dc,
+        pm_doc=pm_doc,
+        corpus_chunks=research_result.get("relevant_chunks", []),
+        transcript=bundle["transcript"],
+    )
+
+    verified = verification_result.get("verified", False)
+    score = verification_result.get("faithfulness_score", 0)
+    issues = verification_result.get("issues", [])
+    critical_issues = [i for i in issues if i.get("severity") == "critical"]
+    warning_issues = [i for i in issues if i.get("severity") == "warning"]
+
+    print(f"  Faithfulness score: {score}/10")
+    print(f"  Verified: {verified}")
+    if critical_issues:
+        print(f"  ❌ Critical issues ({len(critical_issues)}):")
+        for i in critical_issues:
+            print(f"    - [{i.get('location')}] {i.get('claim', '')[:80]}")
+            print(f"      Reason: {i.get('reason', '')[:100]}")
+    if warning_issues:
+        print(f"  ⚠ Warnings ({len(warning_issues)}):")
+        for i in warning_issues:
+            print(f"    - [{i.get('location')}] {i.get('claim', '')[:80]}")
+
+    # Step 6: Write outputs
+    print("\n[Step 6] Writing outputs...")
     output_dir = PROJECT_ROOT / "output" / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy assets to output so images render in markdown viewers
-    import shutil
+    # Copy assets to output
     for asset_path in bundle["asset_paths"]:
         for sub in ["release_note", "doc_page"]:
             asset_dest = output_dir / sub / "assets"
@@ -241,23 +335,31 @@ def run_pipeline(bundle_path: str) -> dict:
         (edits_path / "edits.json").write_text(json.dumps(edits, indent=2))
         print(f"    Impacted edits: {edits_path / 'edits.json'} ({len(edits)} pages)")
 
+    # Write verification report
+    (output_dir / "verification_report.json").write_text(json.dumps(verification_result, indent=2))
+    print(f"    Verification: {output_dir / 'verification_report.json'}")
+
     # Write full pipeline output
     pipeline_output = {
         "bundle": bundle,
         "research": research_result,
         "vision": vision_result,
         "draft": draft_result,
+        "verification": verification_result,
         "validation_warnings": validation_warnings,
         "timestamp": datetime.now().isoformat(),
     }
     (output_dir / "pipeline_output.json").write_text(json.dumps(pipeline_output, indent=2, default=str))
     print(f"    Full output: {output_dir / 'pipeline_output.json'}")
 
-    # Step 6: Publish PR to GitHub (if token is set)
+    # Step 7: Publish PR to GitHub (if token is set AND verification passes)
     from src.config import GITHUB_TOKEN
     pr_results = {}
-    if GITHUB_TOKEN:
-        print("\n[Step 6] Publishing to GitHub...")
+    if not verified:
+        print(f"\n[Step 7] ❌ Skipping GitHub publish — verification failed ({len(critical_issues)} critical issues)")
+        print("  Fix the source document or re-run after addressing the issues above.")
+    elif GITHUB_TOKEN:
+        print("\n[Step 7] Publishing to GitHub...")
         from src.tools.github_publisher import GitHubPublisher
         feature_slug = Path(
             draft_result.get("release_note", {}).get("filename", "feature.md")
@@ -281,17 +383,19 @@ def run_pipeline(bundle_path: str) -> dict:
         except Exception as e:
             print(f"    GitHub publish failed: {e}")
     else:
-        print("\n[Step 6] Skipping GitHub publish (GITHUB_TOKEN not set)")
+        print("\n[Step 7] Skipping GitHub publish (GITHUB_TOKEN not set)")
 
     print(f"\n{'=' * 60}")
     print(f"Pipeline complete!")
+    print(f"Verification: {'✅ PASSED' if verified else '❌ FAILED'} (score: {score}/10)")
     print(f"Output: {output_dir}")
     print(f"{'=' * 60}")
 
     return {
-        "status": "success",
+        "status": "success" if verified else "verification_failed",
         "output_dir": str(output_dir),
         "validation_warnings": validation_warnings,
+        "verification": verification_result,
         "pr_results": pr_results,
     }
 

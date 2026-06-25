@@ -49,28 +49,38 @@ jobs:
 
       - name: Extract feedback text
         id: feedback
+        env:
+          DISPATCH_FEEDBACK: ${{ github.event.client_payload.feedback }}
+          DISPATCH_PR: ${{ github.event.client_payload.pr_number }}
+          DISPATCH_REPO: ${{ github.event.client_payload.source_repo }}
+          DISPATCH_USER: ${{ github.event.client_payload.commenter }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            FEEDBACK="${{ github.event.client_payload.feedback }}"
-            SOURCE="PR #${{ github.event.client_payload.pr_number }} in ${{ github.event.client_payload.source_repo }} by ${{ github.event.client_payload.commenter }}"
+            FEEDBACK="$DISPATCH_FEEDBACK"
+            SOURCE="PR #${DISPATCH_PR} in ${DISPATCH_REPO} by ${DISPATCH_USER}"
           else
-            COMMENT="${{ github.event.comment.body }}"
-            FEEDBACK="$COMMENT"
-            SOURCE="PR #${{ github.event.issue.number }} in this repo"
+            FEEDBACK="$COMMENT_BODY"
+            SOURCE="PR #${ISSUE_NUMBER} in this repo"
           fi
           echo "text=$FEEDBACK" >> $GITHUB_OUTPUT
           echo "source=$SOURCE" >> $GITHUB_OUTPUT
-          echo "Feedback from $SOURCE: $FEEDBACK"
+          echo "Feedback from $SOURCE"
 
       - name: Run memory updater
+        env:
+          FEEDBACK_TEXT: ${{ steps.feedback.outputs.text }}
         run: |
-          python -m src.agents.memory_updater --feedback "${{ steps.feedback.outputs.text }}"
+          python -m src.agents.memory_updater --feedback "$FEEDBACK_TEXT"
 
       - name: Commit updated memory files
+        env:
+          FEEDBACK_SOURCE: ${{ steps.feedback.outputs.source }}
         run: |
           git config user.name "FlytBase Doc Pipeline"
           git config user.email "docs-pipeline@flytbase.com"
           git add memory/
           git diff --staged --quiet && echo "No memory changes to commit" || \
-            git commit -m "memory: update from ${{ steps.feedback.outputs.source }}"
+            git commit -m "memory: update from $FEEDBACK_SOURCE"
           git push
