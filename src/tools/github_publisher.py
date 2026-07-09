@@ -143,6 +143,75 @@ class GitHubPublisher:
 
         return "".join(new_lines)
 
+    def _update_summary(self, repo: str, branch: str, section_title: str,
+                        file_path: str, page_title: str) -> None:
+        """Add a new page entry to SUMMARY.md under the matching section.
+
+        GitBook SUMMARY.md format:
+          ## Section Title
+          * [Page Title](path/to/file.md)
+
+        This finds the section by title and appends the new entry at the end of it.
+        If no matching section is found, appends at the end of the file.
+        """
+        summary_content, summary_sha = self._get_file(repo, "SUMMARY.md", branch)
+        if summary_content is None:
+            return
+
+        entry = f"* [{page_title}]({file_path})"
+
+        # Check if entry already exists
+        if file_path in summary_content:
+            return
+
+        lines = summary_content.splitlines()
+        insert_idx = None
+
+        # Find the section and the end of its entries
+        in_section = False
+        for i, line in enumerate(lines):
+            # Match section headers (## July 2026, ## May 2026, etc.)
+            if line.strip().startswith("#") and section_title.lower() in line.lower():
+                in_section = True
+                continue
+            if in_section:
+                # We're past the section header — look for the end of this section
+                if line.strip().startswith("#"):
+                    # Hit the next section — insert before it
+                    insert_idx = i
+                    break
+                if line.strip().startswith("* ["):
+                    # Track the last entry in this section
+                    insert_idx = i + 1
+
+        if insert_idx is None:
+            if in_section:
+                # Section found but no entries yet — append at end
+                insert_idx = len(lines)
+            else:
+                # Section not found — create it at the top (after first line)
+                # Find the first ## heading to insert before it
+                first_section_idx = None
+                for i, line in enumerate(lines):
+                    if line.strip().startswith("## "):
+                        first_section_idx = i
+                        break
+                if first_section_idx is not None:
+                    lines.insert(first_section_idx, f"\n## {section_title}\n")
+                    insert_idx = first_section_idx + 1
+                else:
+                    lines.append(f"\n## {section_title}")
+                    insert_idx = len(lines)
+
+        lines.insert(insert_idx, entry)
+        updated = "\n".join(lines) + "\n"
+
+        self._write_file(
+            repo, "SUMMARY.md", updated, branch,
+            f"docs: add {page_title} to SUMMARY.md",
+            existing_sha=summary_sha,
+        )
+
     def _create_pr(self, repo: str, branch: str, title: str, body: str) -> str:
         """Open a pull request. Returns the PR URL."""
         data = self._api("POST", repo, "pulls", json={
@@ -189,6 +258,14 @@ class GitHubPublisher:
                 self._write_file(
                     RELEASES_REPO, file_path, full_content, branch,
                     f"docs: add {feature_slug} release note",
+                )
+
+                # Add to SUMMARY.md
+                feature_title = feature_slug.replace("-", " ").title()
+                section_title = release_month.replace("-", " ").upper()
+                self._update_summary(
+                    RELEASES_REPO, branch, section_title,
+                    file_path, feature_title,
                 )
 
                 # Write assets
@@ -258,6 +335,15 @@ class GitHubPublisher:
                     DOCS_REPO, file_path, full_content, branch,
                     f"docs: add {feature_slug} doc page",
                 )
+
+                # Add to SUMMARY.md — use parent section from target_path
+                feature_title = feature_slug.replace("-", " ").title()
+                parent_section = target_path.replace("-", " ").replace("/", " > ").title() if target_path else ""
+                if parent_section:
+                    self._update_summary(
+                        DOCS_REPO, branch, parent_section.split(" > ")[-1],
+                        file_path, feature_title,
+                    )
 
                 # Write assets
                 for asset_path in bundle_asset_paths:
