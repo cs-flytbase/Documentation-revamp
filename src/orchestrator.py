@@ -371,6 +371,7 @@ def run_pipeline(bundle_path: str) -> dict:
                 output_dir=str(output_dir),
                 feature_slug=feature_slug,
                 bundle_asset_paths=bundle["asset_paths"],
+                release_month=release_month,
             )
             if pr_results.get("releases_pr"):
                 print(f"    Releases PR: {pr_results['releases_pr']}")

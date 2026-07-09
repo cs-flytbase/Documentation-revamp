@@ -19,7 +19,7 @@ from src.config import GITHUB_TOKEN
 
 DOCS_REPO = "FlytBaseAILabs/flytbase-docs"
 RELEASES_REPO = "FlytBaseAILabs/flytbase-releases"
-BASE_BRANCH = "dushyant"
+BASE_BRANCH = "main"
 
 
 class GitHubPublisher:
@@ -159,6 +159,7 @@ class GitHubPublisher:
         output_dir: str,
         feature_slug: str,
         bundle_asset_paths: list[str],
+        release_month: str = "",
     ) -> dict:
         """Full publish flow: create branches, write files, patch impacted pages, open PRs.
 
@@ -184,7 +185,7 @@ class GitHubPublisher:
                     release_note.get("frontmatter", "") + "\n\n" +
                     release_note.get("content", "")
                 )
-                file_path = f"may-2026/{filename}"
+                file_path = f"{release_month}/{filename}"
                 self._write_file(
                     RELEASES_REPO, file_path, full_content, branch,
                     f"docs: add {feature_slug} release note",
@@ -196,7 +197,7 @@ class GitHubPublisher:
                     asset_content = Path(asset_path).read_bytes()
                     asset_b64 = base64.b64encode(asset_content).decode("utf-8")
                     try:
-                        self._api("PUT", RELEASES_REPO, f"contents/may-2026/assets/{asset_name}", json={
+                        self._api("PUT", RELEASES_REPO, f"contents/{release_month}/assets/{asset_name}", json={
                             "message": f"docs: add assets for {feature_slug}",
                             "content": asset_b64,
                             "branch": branch,
