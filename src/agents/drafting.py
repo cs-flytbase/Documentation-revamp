@@ -58,6 +58,7 @@ FORMATTING:
 - Navigation paths with >: **Verkos AI > Site Pointers**.
 - GitBook hints: {% hint style="info" %} ... {% endhint %}
 - Frontmatter: ---\ndescription: >-\n  Summary here.\n---
+- The frontmatter description MUST be under 150 characters. One short sentence only.
 
 CRITICAL REQUIREMENTS:
 1. EVERY section from the PM document must appear in the release note.
@@ -142,6 +143,7 @@ FORMATTING:
 - Navigation paths with >: **Verkos AI > Site Pointers**.
 - GitBook hints: {% hint style="info" %} ... {% endhint %}
 - Frontmatter: ---\ndescription: >-\n  Summary here.\n---
+- The frontmatter description MUST be under 150 characters. One short sentence only.
 
 CRITICAL REQUIREMENTS:
 1. Doc page must be 6000+ characters / 1500+ words. This is NON-NEGOTIABLE.
