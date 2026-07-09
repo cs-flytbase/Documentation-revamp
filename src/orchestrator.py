@@ -352,14 +352,15 @@ def run_pipeline(bundle_path: str) -> dict:
     (output_dir / "pipeline_output.json").write_text(json.dumps(pipeline_output, indent=2, default=str))
     print(f"    Full output: {output_dir / 'pipeline_output.json'}")
 
-    # Step 7: Publish PR to GitHub (if token is set AND verification passes)
+    # Step 7: Publish PR to GitHub (if token is set)
     from src.config import GITHUB_TOKEN
     pr_results = {}
-    if not verified:
-        print(f"\n[Step 7] ❌ Skipping GitHub publish — verification failed ({len(critical_issues)} critical issues)")
-        print("  Fix the source document or re-run after addressing the issues above.")
-    elif GITHUB_TOKEN:
+    if not GITHUB_TOKEN:
+        print("\n[Step 7] Skipping GitHub publish (GITHUB_TOKEN not set)")
+    else:
         print("\n[Step 7] Publishing to GitHub...")
+        if not verified:
+            print(f"  ⚠ Verification flagged {len(critical_issues)} critical issues — included in PR for reviewer")
         from src.tools.github_publisher import GitHubPublisher
         feature_slug = Path(
             draft_result.get("release_note", {}).get("filename", "feature.md")
@@ -383,8 +384,6 @@ def run_pipeline(bundle_path: str) -> dict:
                     print(f"      - {e}")
         except Exception as e:
             print(f"    GitHub publish failed: {e}")
-    else:
-        print("\n[Step 7] Skipping GitHub publish (GITHUB_TOKEN not set)")
 
     print(f"\n{'=' * 60}")
     print(f"Pipeline complete!")

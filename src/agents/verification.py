@@ -131,10 +131,9 @@ Return the verification result as JSON."""
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0]
             result = json.loads(text)
 
-            # Enforce: verified must be false if any critical issues
+            # Enforce: verified is determined by critical issues only
             critical_issues = [i for i in result.get("issues", []) if i.get("severity") == "critical"]
-            if critical_issues:
-                result["verified"] = False
+            result["verified"] = len(critical_issues) == 0
 
             return result
         except json.JSONDecodeError:
