@@ -229,6 +229,7 @@ class GitHubPublisher:
         feature_slug: str,
         bundle_asset_paths: list[str],
         release_month: str = "",
+        mode: str = "both",
     ) -> dict:
         """Full publish flow: create branches, write files, patch impacted pages, open PRs.
 
@@ -243,7 +244,8 @@ class GitHubPublisher:
         impacted_edits = draft_result.get("impacted_page_edits", [])
 
         # ── Releases repo ──────────────────────────────────────────────────
-        try:
+        if mode != "doc_only":
+         try:
             releases_sha = self._get_branch_sha(RELEASES_REPO, BASE_BRANCH)
             self._create_branch(RELEASES_REPO, branch, releases_sha)
 
@@ -318,7 +320,8 @@ class GitHubPublisher:
             results["errors"].append(f"Releases repo failed: {e}")
 
         # ── Docs repo ──────────────────────────────────────────────────────
-        try:
+        if mode != "release_only":
+         try:
             docs_sha = self._get_branch_sha(DOCS_REPO, BASE_BRANCH)
             self._create_branch(DOCS_REPO, branch, docs_sha)
 

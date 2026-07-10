@@ -1,0 +1,199 @@
+name: Slack DocAgent Pipeline
+
+on:
+  repository_dispatch:
+    types: [slack-pipeline]
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env << ENVEOF
+          PINECONE_API_KEY=${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME=flytbase-docs
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          LLM_PROVIDER=openai
+          GITHUB_TOKEN=${{ secrets.FLYTBASE_GITHUB_TOKEN }}
+          INPUT_BUNDLE_DIR=./input_bundles
+          OUTPUT_DIR=./output
+          MEMORY_DIR=./memory
+          ENVEOF
+
+      - name: Extract payload
+        id: payload
+        run: |
+          echo "feature_name=${{ github.event.client_payload.feature_name }}" >> $GITHUB_OUTPUT
+          echo "mode=${{ github.event.client_payload.mode }}" >> $GITHUB_OUTPUT
+          echo "reference_link=${{ github.event.client_payload.reference_link }}" >> $GITHUB_OUTPUT
+
+      - name: Download images from Slack
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          BUNDLE_DIR="input_bundles/${{ steps.payload.outputs.feature_name }}"
+          mkdir -p "$BUNDLE_DIR"
+
+          # Parse image URLs from payload
+          IMAGE_URLS='${{ toJson(github.event.client_payload.image_urls) }}'
+          echo "$IMAGE_URLS" | python3 -c "
+          import json, sys, os, urllib.request
+          urls = json.load(sys.stdin)
+          bundle_dir = os.environ.get('BUNDLE_DIR', 'input_bundles/feature')
+          token = os.environ.get('SLACK_BOT_TOKEN', '')
+          for i, url in enumerate(urls or []):
+              if not url: continue
+              ext = url.split('.')[-1].split('?')[0]
+              if ext not in ('png','jpg','jpeg','gif','webp'): ext = 'png'
+              filename = f'image-{i+1}.{ext}'
+              filepath = os.path.join(bundle_dir, filename)
+              req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
+              try:
+                  with urllib.request.urlopen(req) as resp:
+                      with open(filepath, 'wb') as f:
+                          f.write(resp.read())
+                  print(f'Downloaded: {filename}')
+              except Exception as e:
+                  print(f'Failed to download {url}: {e}')
+          " 2>&1
+          echo "BUNDLE_DIR=$BUNDLE_DIR" >> $GITHUB_ENV
+
+      - name: Run Source Agent and Pipeline
+        env:
+          BUNDLE_DIR: ${{ env.BUNDLE_DIR }}
+        run: |
+          python3 -c "
+          import json, os, sys
+          sys.path.insert(0, '.')
+
+          from src.agents.source import SourceAgent
+          from src.orchestrator import run_pipeline
+          from pathlib import Path
+
+          # Get payload
+          content = '''${{ github.event.client_payload.content }}'''
+          comments = '''${{ github.event.client_payload.comments }}'''
+          reference_link = '${{ steps.payload.outputs.reference_link }}'
+          mode = '${{ steps.payload.outputs.mode }}' or 'both'
+          feature_name = '${{ steps.payload.outputs.feature_name }}'
+          bundle_dir = os.environ['BUNDLE_DIR']
+
+          # Step 1: Source Agent — build pm_doc from content
+          print('=' * 60)
+          print('[Slack Pipeline] Running Source Agent...')
+          source_agent = SourceAgent()
+          source_result = source_agent.build_pm_doc(
+              content=content,
+              comments=comments,
+              reference_link=reference_link,
+          )
+
+          if source_result.get('error'):
+              print(f'Source Agent failed: {source_result[\"error\"]}')
+              sys.exit(1)
+
+          pm_doc = source_result['pm_doc']
+          print(f'[Slack Pipeline] PM doc generated ({len(pm_doc)} chars)')
+
+          # Write pm_doc to bundle directory
+          pm_doc_path = Path(bundle_dir) / 'pm_doc.md'
+          pm_doc_path.write_text(pm_doc)
+          print(f'[Slack Pipeline] Wrote pm_doc to {pm_doc_path}')
+
+          # Step 2: Run the existing pipeline
+          print('[Slack Pipeline] Running pipeline...')
+          result = run_pipeline(bundle_dir, mode=mode)
+          print(f'[Slack Pipeline] Pipeline result: {result.get(\"status\", \"unknown\")}')
+
+          # Save PR URLs for the notification step
+          pr_results = result.get('pr_results', {})
+          with open('pr_results.json', 'w') as f:
+              json.dump(pr_results, f)
+          "
+
+      - name: Notify Slack
+        if: always()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: |
+          python3 -c "
+          import json, os, urllib.request
+
+          token = os.environ['SLACK_BOT_TOKEN']
+          channel = '${{ github.event.client_payload.slack_channel }}'
+          thread_ts = '${{ github.event.client_payload.slack_thread_ts }}'
+
+          # Read PR results
+          pr_results = {}
+          try:
+              with open('pr_results.json') as f:
+                  pr_results = json.load(f)
+          except: pass
+
+          releases_pr = pr_results.get('releases_pr', '')
+          docs_pr = pr_results.get('docs_pr', '')
+          errors = pr_results.get('errors', [])
+
+          # Build message
+          lines = []
+          if releases_pr:
+              lines.append(f'✅ Release Note PR: {releases_pr}')
+          if docs_pr:
+              lines.append(f'✅ Doc Page PR: {docs_pr}')
+          if errors:
+              lines.append('⚠️ Errors:')
+              for e in errors:
+                  lines.append(f'  • {e}')
+          if not lines:
+              lines.append('❌ Pipeline completed but no PRs were created. Check the Actions log for details.')
+
+          lines.append('')
+          lines.append('Want me to change anything?')
+
+          message = '\n'.join(lines)
+
+          # Post to Slack
+          if channel and thread_ts:
+              payload = json.dumps({
+                  'channel': channel,
+                  'thread_ts': thread_ts,
+                  'text': message,
+              }).encode()
+              req = urllib.request.Request(
+                  'https://slack.com/api/chat.postMessage',
+                  data=payload,
+                  headers={
+                      'Authorization': f'Bearer {token}',
+                      'Content-Type': 'application/json',
+                  },
+              )
+              urllib.request.urlopen(req)
+              print(f'Posted to Slack: {channel}/{thread_ts}')
+          else:
+              print(f'No Slack channel/thread info. PR results: {message}')
+          "
+
+      - name: Upload pipeline output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slack-pipeline-output-${{ github.event.client_payload.feature_name }}
+          path: output/
+          retention-days: 14

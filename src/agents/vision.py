@@ -35,7 +35,7 @@ Return a JSON array of objects, one per asset file. Each object:
 
 Rules:
 - Be specific about UI elements visible (buttons, panels, maps, drones, modals).
-- If it's a GIF, describe the workflow/action being demonstrated and note sequencing relative to other GIFs.
+- If it's a GIF, multiple key frames from the animation are provided in sequence. Describe the FULL workflow/action shown across all frames — what changes between frames, what the user is doing, and the end result.
 - If it's a screenshot, describe the state of the UI and what's highlighted or annotated.
 - section_heading must be copied EXACTLY from the PM doc — do not paraphrase or invent headings.
 - is_hero is true ONLY for images marked with [HERO GIF] or the first [SCREENSHOT] if no hero marker exists.
@@ -96,8 +96,41 @@ class VisionAgent(BaseAgent):
             max_tokens=2048,
         )
 
-    def _encode_image(self, file_path: str) -> tuple[str, str]:
-        """Read and base64-encode an image file. Returns (base64_data, media_type)."""
+    def _extract_gif_frames(self, file_path: str, max_frames: int = 6) -> list[tuple[str, str]]:
+        """Extract key frames from a GIF and return as base64-encoded PNGs.
+
+        Samples frames evenly across the GIF duration so the LLM can
+        understand the full workflow being demonstrated.
+        """
+        from PIL import Image
+        import io
+
+        img = Image.open(file_path)
+        total_frames = getattr(img, "n_frames", 1)
+
+        if total_frames <= 1:
+            # Static GIF — treat as a normal image
+            return [self._encode_static(file_path)]
+
+        # Pick evenly spaced frame indices
+        if total_frames <= max_frames:
+            indices = list(range(total_frames))
+        else:
+            indices = [int(i * (total_frames - 1) / (max_frames - 1)) for i in range(max_frames)]
+
+        frames = []
+        for idx in indices:
+            img.seek(idx)
+            frame = img.convert("RGBA")
+            buf = io.BytesIO()
+            frame.save(buf, format="PNG")
+            data = base64.b64encode(buf.getvalue()).decode("utf-8")
+            frames.append((data, "image/png"))
+
+        return frames
+
+    def _encode_static(self, file_path: str) -> tuple[str, str]:
+        """Read and base64-encode a static image file. Returns (base64_data, media_type)."""
         path = Path(file_path)
         media_type, _ = mimetypes.guess_type(str(path))
         if not media_type:
@@ -114,6 +147,16 @@ class VisionAgent(BaseAgent):
         with open(path, "rb") as f:
             data = base64.b64encode(f.read()).decode("utf-8")
         return data, media_type
+
+    def _encode_image(self, file_path: str) -> tuple[str, str] | list[tuple[str, str]]:
+        """Encode an image or GIF. For animated GIFs, returns multiple frames."""
+        path = Path(file_path)
+        if path.suffix.lower() == ".gif":
+            frames = self._extract_gif_frames(file_path)
+            if len(frames) > 1:
+                return frames  # Multiple frames for animated GIF
+            return frames[0]  # Single frame for static GIF
+        return self._encode_static(file_path)
 
     def _build_prompt(self, pm_doc: str, filenames: list[str], markers: list[dict]) -> str:
         """Build the text prompt with PM doc context and marker analysis."""
@@ -218,24 +261,53 @@ Return a single JSON array with {len(filenames)} objects, in the same order as t
         print(f"  [Vision] Processing {len(file_paths)} assets in single batch call")
         print(f"  [Vision] PM doc length: {len(pm_doc)} chars, {len(markers)} markers found")
 
-        # Encode all images
+        # Encode all images — GIFs may produce multiple frames
         encoded_images = []
-        for path in file_paths:
+        gif_frame_counts = {}  # track which files are multi-frame GIFs
+        for i, path in enumerate(file_paths):
             try:
-                encoded_images.append(self._encode_image(path))
+                result = self._encode_image(path)
+                if isinstance(result, list):
+                    # Multi-frame GIF — store frames separately
+                    gif_frame_counts[i] = len(result)
+                    encoded_images.append(result[0])  # placeholder for indexing
+                    print(f"  [Vision] GIF {filenames[i]}: extracted {len(result)} key frames")
+                else:
+                    encoded_images.append(result)
             except Exception as e:
                 print(f"  [Vision] WARNING: Could not encode {Path(path).name}: {e}")
                 encoded_images.append(None)
 
         # Filter out failed encodes but track indices
         valid_indices = [i for i, img in enumerate(encoded_images) if img is not None]
-        valid_images = [encoded_images[i] for i in valid_indices]
         valid_filenames = [filenames[i] for i in valid_indices]
 
-        if not valid_images:
+        if not valid_indices:
             return [self._fallback_result(fn, markers, idx) for idx, fn in enumerate(filenames)]
 
+        # Build flat image list — expand GIF frames inline
+        valid_images = []
+        for i in valid_indices:
+            if i in gif_frame_counts:
+                # Re-extract frames for this GIF
+                frames = self._extract_gif_frames(file_paths[i])
+                valid_images.extend(frames)
+            else:
+                valid_images.append(encoded_images[i])
+
         prompt_text = self._build_prompt(pm_doc, valid_filenames, markers)
+
+        # Add GIF frame context to the prompt
+        if gif_frame_counts:
+            gif_notes = []
+            for i in valid_indices:
+                if i in gif_frame_counts:
+                    gif_notes.append(
+                        f"- {filenames[i]} is an animated GIF. {gif_frame_counts[i]} key frames "
+                        f"are provided in sequence. Describe the FULL workflow shown across all frames."
+                    )
+            prompt_text += "\n\n## GIF Frame Notes\n" + "\n".join(gif_notes)
+
         raw_response = self._call_vision_batch(prompt_text, valid_images)
 
         # Parse response

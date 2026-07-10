@@ -12,6 +12,9 @@ lxml>=5.0.0
 tiktoken>=0.7.0            # token counting for chunking
 sentence-transformers>=3.0.0  # cross-encoder reranking
 
+# Image processing
+Pillow>=10.0.0
+
 # Utilities
 python-dotenv>=1.0.0
 pyyaml>=6.0.0

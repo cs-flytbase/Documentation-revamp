@@ -1,6 +1,7 @@
 # Agent model assignments
 # Groq models (free tier testing)
 models_groq:
+  source: llama-3.3-70b-versatile          # scraping + synthesis
   research: llama-3.3-70b-versatile        # strong reasoning for corpus analysis
   vision: llama-3.2-11b-vision-preview      # multimodal for image descriptions
   drafting: llama-3.3-70b-versatile         # best available for writing quality
@@ -8,13 +9,15 @@ models_groq:
 
 # OpenAI models (mid-tier, 128K context)
 models_openai:
+  source: gpt-4o
   research: gpt-4o
-  vision: gpt-4o-mini
+  vision: gpt-4o
   drafting: gpt-4o
   memory_updater: gpt-4o-mini
 
 # Anthropic models (production)
 models_anthropic:
+  source: claude-sonnet-4-6
   research: claude-sonnet-4-6
   vision: claude-haiku-4-5-20251001
   drafting: claude-opus-4-6

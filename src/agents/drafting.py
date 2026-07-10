@@ -318,15 +318,20 @@ Release month: {release_month or "current month"}"""
         release_month: str = "",
         transcript: str = "",
         exemplar: str = "",
+        mode: str = "both",
     ) -> dict:
         context = self._build_context(
             pm_doc, research_output, vision_output, asset_filenames,
             youtube_link, release_month, transcript, exemplar,
         )
 
-        # ── Call 1: Release Note ──────────────────────────────────────
-        self.system_prompt = RELEASE_NOTE_PROMPT
-        release_message = f"""Produce the release note from this PM document.
+        release_result = {}
+        doc_result = {}
+
+        # ── Call 1: Release Note (skip if doc_only) ───────────────────
+        if mode in ("both", "release_only"):
+            self.system_prompt = RELEASE_NOTE_PROMPT
+            release_message = f"""Produce the release note from this PM document.
 
 {context}
 
@@ -338,20 +343,23 @@ CHECKLIST before you respond:
 [ ] Real-world examples from PM doc are preserved word-for-word
 [ ] NO invented or assumed details — only facts from the PM doc"""
 
-        print("    [Drafting] Generating release note...")
-        release_response = self.run(release_message)
+            print("    [Drafting] Generating release note...")
+            release_response = self.run(release_message)
 
-        try:
-            text = release_response.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-            release_result = json.loads(text)
-        except json.JSONDecodeError:
-            return {"error": "Failed to parse release note output", "raw_response": release_response}
+            try:
+                text = release_response.strip()
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+                release_result = json.loads(text)
+            except json.JSONDecodeError:
+                return {"error": "Failed to parse release note output", "raw_response": release_response}
+        else:
+            print("    [Drafting] Skipping release note (mode: doc_only)")
 
-        # ── Call 2: Doc Page + Impacted Edits ──────────────────────────
-        self.system_prompt = DOC_PAGE_PROMPT
-        doc_message = f"""Produce the doc page and impacted page edits from this PM document.
+        # ── Call 2: Doc Page + Impacted Edits (skip if release_only) ──
+        if mode in ("both", "doc_only"):
+            self.system_prompt = DOC_PAGE_PROMPT
+            doc_message = f"""Produce the doc page and impacted page edits from this PM document.
 
 {context}
 
@@ -366,21 +374,23 @@ CHECKLIST before you respond:
 [ ] impacted_page_edits uses section_heading + patch_mode + patch_content format
 [ ] NO invented or assumed details — only facts from the PM doc"""
 
-        print("    [Drafting] Generating doc page + impacted edits...")
-        doc_response = self.run(doc_message)
+            print("    [Drafting] Generating doc page + impacted edits...")
+            doc_response = self.run(doc_message)
 
-        try:
-            text = doc_response.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-            doc_result = json.loads(text)
-        except json.JSONDecodeError:
-            return {"error": "Failed to parse doc page output", "raw_response": doc_response}
+            try:
+                text = doc_response.strip()
+                if text.startswith("```"):
+                    text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+                doc_result = json.loads(text)
+            except json.JSONDecodeError:
+                return {"error": "Failed to parse doc page output", "raw_response": doc_response}
+        else:
+            print("    [Drafting] Skipping doc page (mode: release_only)")
 
         # ── Combine results ────────────────────────────────────────────
         combined = {
             "release_note": release_result,
-            "doc_page": {k: v for k, v in doc_result.items() if k != "impacted_page_edits"},
+            "doc_page": {k: v for k, v in doc_result.items() if k != "impacted_page_edits"} if doc_result else {},
             "impacted_page_edits": doc_result.get("impacted_page_edits", []),
         }
 

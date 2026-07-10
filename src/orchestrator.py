@@ -144,7 +144,7 @@ def fetch_exemplar(research_result: dict) -> str:
         return ""
 
 
-def run_pipeline(bundle_path: str) -> dict:
+def run_pipeline(bundle_path: str, mode: str = "both") -> dict:
     """Run the full documentation generation pipeline."""
     print("=" * 60)
     print("FlytBase Documentation Pipeline")
@@ -240,6 +240,7 @@ def run_pipeline(bundle_path: str) -> dict:
         release_month=release_month,
         transcript=bundle["transcript"],
         exemplar=exemplar,
+        mode=mode,
     )
 
     if "error" in draft_result:
@@ -373,6 +374,7 @@ def run_pipeline(bundle_path: str) -> dict:
                 feature_slug=feature_slug,
                 bundle_asset_paths=bundle["asset_paths"],
                 release_month=release_month,
+                mode=mode,
             )
             if pr_results.get("releases_pr"):
                 print(f"    Releases PR: {pr_results['releases_pr']}")
@@ -404,5 +406,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("bundle", help="Path to input bundle directory")
+    parser.add_argument("--mode", choices=["both", "release_only", "doc_only"],
+                        default="both", help="Output mode")
     args = parser.parse_args()
-    run_pipeline(args.bundle)
+    run_pipeline(args.bundle, mode=args.mode)
