@@ -42,29 +42,49 @@ jobs:
         run: |
           echo "feature_name=${{ github.event.client_payload.feature_name }}" >> $GITHUB_OUTPUT
           echo "mode=${{ github.event.client_payload.mode }}" >> $GITHUB_OUTPUT
-          echo "reference_link=${{ github.event.client_payload.reference_link }}" >> $GITHUB_OUTPUT
+          echo "content_key=${{ github.event.client_payload.content_key }}" >> $GITHUB_OUTPUT
+          echo "worker_url=${{ github.event.client_payload.worker_url }}" >> $GITHUB_OUTPUT
 
-      - name: Download images from Slack
+      - name: Fetch content from Worker KV and run pipeline
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
         run: |
-          BUNDLE_DIR="input_bundles/${{ steps.payload.outputs.feature_name }}"
-          mkdir -p "$BUNDLE_DIR"
+          python3 -c "
+          import json, os, sys, urllib.request
+          sys.path.insert(0, '.')
 
-          # Parse image URLs from payload
-          IMAGE_URLS='${{ toJson(github.event.client_payload.image_urls) }}'
-          echo "$IMAGE_URLS" | python3 -c "
-          import json, sys, os, urllib.request
-          urls = json.load(sys.stdin)
-          bundle_dir = os.environ.get('BUNDLE_DIR', 'input_bundles/feature')
-          token = os.environ.get('SLACK_BOT_TOKEN', '')
-          for i, url in enumerate(urls or []):
+          feature_name = '${{ steps.payload.outputs.feature_name }}'
+          mode = '${{ steps.payload.outputs.mode }}' or 'both'
+          content_key = '${{ steps.payload.outputs.content_key }}'
+          worker_url = '${{ steps.payload.outputs.worker_url }}'
+          slack_token = os.environ.get('SLACK_BOT_TOKEN', '')
+
+          # Step 0: Fetch content from Worker KV
+          print('=' * 60)
+          print(f'[Slack Pipeline] Fetching content from KV: {content_key}')
+          kv_url = f'{worker_url}/content?key={content_key}'
+          req = urllib.request.Request(kv_url)
+          with urllib.request.urlopen(req) as resp:
+              kv_data = json.loads(resp.read().decode())
+
+          content = kv_data.get('content', '')
+          comments = kv_data.get('comments', '')
+          reference_link = kv_data.get('reference_link', '')
+          image_urls = kv_data.get('image_urls', [])
+          print(f'[Slack Pipeline] Content: {len(content)} chars, Images: {len(image_urls)}, Reference: {reference_link[:50] if reference_link else \"none\"}')
+
+          # Step 0.5: Download images from Slack
+          from pathlib import Path
+          bundle_dir = f'input_bundles/{feature_name}'
+          Path(bundle_dir).mkdir(parents=True, exist_ok=True)
+
+          for i, url in enumerate(image_urls or []):
               if not url: continue
               ext = url.split('.')[-1].split('?')[0]
               if ext not in ('png','jpg','jpeg','gif','webp'): ext = 'png'
               filename = f'image-{i+1}.{ext}'
               filepath = os.path.join(bundle_dir, filename)
-              req = urllib.request.Request(url, headers={'Authorization': f'Bearer {token}'})
+              req = urllib.request.Request(url, headers={'Authorization': f'Bearer {slack_token}'})
               try:
                   with urllib.request.urlopen(req) as resp:
                       with open(filepath, 'wb') as f:
@@ -72,31 +92,11 @@ jobs:
                   print(f'Downloaded: {filename}')
               except Exception as e:
                   print(f'Failed to download {url}: {e}')
-          " 2>&1
-          echo "BUNDLE_DIR=$BUNDLE_DIR" >> $GITHUB_ENV
-
-      - name: Run Source Agent and Pipeline
-        env:
-          BUNDLE_DIR: ${{ env.BUNDLE_DIR }}
-        run: |
-          python3 -c "
-          import json, os, sys
-          sys.path.insert(0, '.')
-
-          from src.agents.source import SourceAgent
-          from src.orchestrator import run_pipeline
-          from pathlib import Path
-
-          # Get payload
-          content = '''${{ github.event.client_payload.content }}'''
-          comments = '''${{ github.event.client_payload.comments }}'''
-          reference_link = '${{ steps.payload.outputs.reference_link }}'
-          mode = '${{ steps.payload.outputs.mode }}' or 'both'
-          feature_name = '${{ steps.payload.outputs.feature_name }}'
-          bundle_dir = os.environ['BUNDLE_DIR']
 
           # Step 1: Source Agent — build pm_doc from content
-          print('=' * 60)
+          from src.agents.source import SourceAgent
+          from src.orchestrator import run_pipeline
+
           print('[Slack Pipeline] Running Source Agent...')
           source_agent = SourceAgent()
           source_result = source_agent.build_pm_doc(
@@ -115,7 +115,6 @@ jobs:
           # Write pm_doc to bundle directory
           pm_doc_path = Path(bundle_dir) / 'pm_doc.md'
           pm_doc_path.write_text(pm_doc)
-          print(f'[Slack Pipeline] Wrote pm_doc to {pm_doc_path}')
 
           # Step 2: Run the existing pipeline
           print('[Slack Pipeline] Running pipeline...')
