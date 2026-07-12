@@ -67,11 +67,34 @@ jobs:
           with urllib.request.urlopen(req) as resp:
               kv_data = json.loads(resp.read().decode())
 
-          content = kv_data.get('content', '')
-          comments = kv_data.get('comments', '')
-          reference_link = kv_data.get('reference_link', '')
+          # Build content from KV data (new format: text_files + links + content)
+          raw_content = kv_data.get('content', '')
+          text_files = kv_data.get('text_files', [])
+          links = kv_data.get('links', [])
           image_urls = kv_data.get('image_urls', [])
-          print(f'[Slack Pipeline] Content: {len(content)} chars, Images: {len(image_urls)}, Reference: {reference_link[:50] if reference_link else \"none\"}')
+
+          # Combine all content sources into one string for the Source Agent
+          content_parts = []
+          # Add any links (Source Agent will scrape them)
+          for link in links:
+              content_parts.append(link)
+          # Add text file contents
+          for tf in text_files:
+              content_parts.append(tf.get('content', ''))
+          # Add raw user text
+          if raw_content:
+              content_parts.append(raw_content)
+          content = '\n\n'.join(content_parts)
+
+          # Extract reference link (first link that looks like releases.flytbase.com)
+          reference_link = ''
+          comments = raw_content[:500] if raw_content else ''
+          for link in links:
+              if 'releases.flytbase.com' in link:
+                  reference_link = link
+                  break
+
+          print(f'[Slack Pipeline] Content: {len(content)} chars, Files: {len(text_files)}, Links: {len(links)}, Images: {len(image_urls)}')
 
           # Step 0.5: Download images from Slack
           from pathlib import Path
