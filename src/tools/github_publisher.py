@@ -245,157 +245,99 @@ class GitHubPublisher:
 
         # ── Releases repo ──────────────────────────────────────────────────
         if mode != "doc_only":
-         try:
-            releases_sha = self._get_branch_sha(RELEASES_REPO, BASE_BRANCH)
-            self._create_branch(RELEASES_REPO, branch, releases_sha)
+            try:
+                releases_sha = self._get_branch_sha(RELEASES_REPO, BASE_BRANCH)
+                self._create_branch(RELEASES_REPO, branch, releases_sha)
 
-            # Write the new release note
-            if release_note:
-                filename = Path(release_note.get("filename", "release.md")).name
-                full_content = (
-                    release_note.get("frontmatter", "") + "\n\n" +
-                    release_note.get("content", "")
-                )
-                file_path = f"{release_month}/{filename}"
-                self._write_file(
-                    RELEASES_REPO, file_path, full_content, branch,
-                    f"docs: add {feature_slug} release note",
-                )
+                if release_note:
+                    filename = Path(release_note.get("filename", "release.md")).name
+                    full_content = release_note.get("frontmatter", "") + "\n\n" + release_note.get("content", "")
+                    file_path = f"{release_month}/{filename}"
+                    self._write_file(RELEASES_REPO, file_path, full_content, branch, f"docs: add {feature_slug} release note")
 
-                # Add to SUMMARY.md
-                feature_title = feature_slug.replace("-", " ").title()
-                section_title = release_month.replace("-", " ").upper()
-                self._update_summary(
-                    RELEASES_REPO, branch, section_title,
-                    file_path, feature_title,
-                )
+                    feature_title = feature_slug.replace("-", " ").title()
+                    section_title = release_month.replace("-", " ").upper()
+                    self._update_summary(RELEASES_REPO, branch, section_title, file_path, feature_title)
 
-                # Write assets
-                for asset_path in bundle_asset_paths:
-                    asset_name = Path(asset_path).name
-                    asset_content = Path(asset_path).read_bytes()
-                    asset_b64 = base64.b64encode(asset_content).decode("utf-8")
-                    try:
-                        self._api("PUT", RELEASES_REPO, f"contents/{release_month}/assets/{asset_name}", json={
-                            "message": f"docs: add assets for {feature_slug}",
-                            "content": asset_b64,
-                            "branch": branch,
-                        })
-                    except requests.HTTPError as e:
-                        results["errors"].append(f"Asset upload failed ({asset_name}): {e}")
+                    for asset_path in bundle_asset_paths:
+                        asset_name = Path(asset_path).name
+                        asset_b64 = base64.b64encode(Path(asset_path).read_bytes()).decode("utf-8")
+                        try:
+                            self._api("PUT", RELEASES_REPO, f"contents/{release_month}/assets/{asset_name}", json={
+                                "message": f"docs: add assets for {feature_slug}", "content": asset_b64, "branch": branch,
+                            })
+                        except requests.HTTPError as e:
+                            results["errors"].append(f"Asset upload failed ({asset_name}): {e}")
 
-            # Patch impacted release pages
-            for edit in impacted_edits:
-                url = edit.get("source_url", "")
-                if "releases.flytbase.com" not in url:
-                    continue
-                try:
-                    _, file_path = self._url_to_repo_path(url)
-                    existing_content, existing_sha = self._get_file(RELEASES_REPO, file_path, BASE_BRANCH)
-                    if existing_content is None:
-                        results["errors"].append(f"File not found in repo: {file_path}")
+                for edit in impacted_edits:
+                    url = edit.get("source_url", "")
+                    if "releases.flytbase.com" not in url:
                         continue
-                    patched = self._apply_patch(
-                        existing_content,
-                        edit.get("section_heading", ""),
-                        edit.get("patch_mode", "append"),
-                        edit.get("patch_content", ""),
-                    )
-                    self._write_file(
-                        RELEASES_REPO, file_path, patched, branch,
-                        f"docs: update {file_path} — cross-reference {feature_slug}",
-                        existing_sha=existing_sha,
-                    )
-                except Exception as e:
-                    results["errors"].append(f"Failed to patch {url}: {e}")
+                    try:
+                        _, file_path = self._url_to_repo_path(url)
+                        existing_content, existing_sha = self._get_file(RELEASES_REPO, file_path, BASE_BRANCH)
+                        if existing_content is None:
+                            results["errors"].append(f"File not found in repo: {file_path}")
+                            continue
+                        patched = self._apply_patch(existing_content, edit.get("section_heading", ""), edit.get("patch_mode", "append"), edit.get("patch_content", ""))
+                        self._write_file(RELEASES_REPO, file_path, patched, branch, f"docs: update {file_path} — cross-reference {feature_slug}", existing_sha=existing_sha)
+                    except Exception as e:
+                        results["errors"].append(f"Failed to patch {url}: {e}")
 
-            feature_title = feature_slug.replace("-", " ").title()
-            pr_body = self._build_pr_body(feature_title, release_note, impacted_edits, "releases")
-            results["releases_pr"] = self._create_pr(
-                RELEASES_REPO, branch,
-                f"✍️ New Release Note: {feature_title}",
-                pr_body,
-            )
-        except Exception as e:
-            results["errors"].append(f"Releases repo failed: {e}")
+                feature_title = feature_slug.replace("-", " ").title()
+                pr_body = self._build_pr_body(feature_title, release_note, impacted_edits, "releases")
+                results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {feature_title}", pr_body)
+            except Exception as e:
+                results["errors"].append(f"Releases repo failed: {e}")
 
         # ── Docs repo ──────────────────────────────────────────────────────
         if mode != "release_only":
-         try:
-            docs_sha = self._get_branch_sha(DOCS_REPO, BASE_BRANCH)
-            self._create_branch(DOCS_REPO, branch, docs_sha)
+            try:
+                docs_sha = self._get_branch_sha(DOCS_REPO, BASE_BRANCH)
+                self._create_branch(DOCS_REPO, branch, docs_sha)
 
-            # Write the new doc page
-            if doc_page:
-                filename = Path(doc_page.get("filename", "doc.md")).name
-                full_content = (
-                    doc_page.get("frontmatter", "") + "\n\n" +
-                    doc_page.get("content", "")
-                )
-                target_path = doc_page.get("target_path", "").strip("/")
-                file_path = f"{target_path}/{filename}" if target_path else filename
-                self._write_file(
-                    DOCS_REPO, file_path, full_content, branch,
-                    f"docs: add {feature_slug} doc page",
-                )
+                if doc_page:
+                    filename = Path(doc_page.get("filename", "doc.md")).name
+                    full_content = doc_page.get("frontmatter", "") + "\n\n" + doc_page.get("content", "")
+                    target_path = doc_page.get("target_path", "").strip("/")
+                    file_path = f"{target_path}/{filename}" if target_path else filename
+                    self._write_file(DOCS_REPO, file_path, full_content, branch, f"docs: add {feature_slug} doc page")
 
-                # Add to SUMMARY.md — use parent section from target_path
-                feature_title = feature_slug.replace("-", " ").title()
-                parent_section = target_path.replace("-", " ").replace("/", " > ").title() if target_path else ""
-                if parent_section:
-                    self._update_summary(
-                        DOCS_REPO, branch, parent_section.split(" > ")[-1],
-                        file_path, feature_title,
-                    )
+                    feature_title = feature_slug.replace("-", " ").title()
+                    parent_section = target_path.replace("-", " ").replace("/", " > ").title() if target_path else ""
+                    if parent_section:
+                        self._update_summary(DOCS_REPO, branch, parent_section.split(" > ")[-1], file_path, feature_title)
 
-                # Write assets
-                for asset_path in bundle_asset_paths:
-                    asset_name = Path(asset_path).name
-                    asset_content = Path(asset_path).read_bytes()
-                    asset_b64 = base64.b64encode(asset_content).decode("utf-8")
-                    try:
-                        self._api("PUT", DOCS_REPO, f"contents/{target_path}/assets/{asset_name}", json={
-                            "message": f"docs: add assets for {feature_slug}",
-                            "content": asset_b64,
-                            "branch": branch,
-                        })
-                    except requests.HTTPError as e:
-                        results["errors"].append(f"Asset upload failed ({asset_name}): {e}")
+                    for asset_path in bundle_asset_paths:
+                        asset_name = Path(asset_path).name
+                        asset_b64 = base64.b64encode(Path(asset_path).read_bytes()).decode("utf-8")
+                        try:
+                            self._api("PUT", DOCS_REPO, f"contents/{target_path}/assets/{asset_name}", json={
+                                "message": f"docs: add assets for {feature_slug}", "content": asset_b64, "branch": branch,
+                            })
+                        except requests.HTTPError as e:
+                            results["errors"].append(f"Asset upload failed ({asset_name}): {e}")
 
-            # Patch impacted docs pages
-            for edit in impacted_edits:
-                url = edit.get("source_url", "")
-                if "docs.flytbase.com" not in url:
-                    continue
-                try:
-                    _, file_path = self._url_to_repo_path(url)
-                    existing_content, existing_sha = self._get_file(DOCS_REPO, file_path, BASE_BRANCH)
-                    if existing_content is None:
-                        results["errors"].append(f"File not found in repo: {file_path}")
+                for edit in impacted_edits:
+                    url = edit.get("source_url", "")
+                    if "docs.flytbase.com" not in url:
                         continue
-                    patched = self._apply_patch(
-                        existing_content,
-                        edit.get("section_heading", ""),
-                        edit.get("patch_mode", "append"),
-                        edit.get("patch_content", ""),
-                    )
-                    self._write_file(
-                        DOCS_REPO, file_path, patched, branch,
-                        f"docs: update {file_path} — cross-reference {feature_slug}",
-                        existing_sha=existing_sha,
-                    )
-                except Exception as e:
-                    results["errors"].append(f"Failed to patch {url}: {e}")
+                    try:
+                        _, file_path = self._url_to_repo_path(url)
+                        existing_content, existing_sha = self._get_file(DOCS_REPO, file_path, BASE_BRANCH)
+                        if existing_content is None:
+                            results["errors"].append(f"File not found in repo: {file_path}")
+                            continue
+                        patched = self._apply_patch(existing_content, edit.get("section_heading", ""), edit.get("patch_mode", "append"), edit.get("patch_content", ""))
+                        self._write_file(DOCS_REPO, file_path, patched, branch, f"docs: update {file_path} — cross-reference {feature_slug}", existing_sha=existing_sha)
+                    except Exception as e:
+                        results["errors"].append(f"Failed to patch {url}: {e}")
 
-            feature_title = feature_slug.replace("-", " ").title()
-            pr_body = self._build_pr_body(feature_title, doc_page, impacted_edits, "docs")
-            results["docs_pr"] = self._create_pr(
-                DOCS_REPO, branch,
-                f"📄 New Doc Page: {feature_title}",
-                pr_body,
-            )
-        except Exception as e:
-            results["errors"].append(f"Docs repo failed: {e}")
+                feature_title = feature_slug.replace("-", " ").title()
+                pr_body = self._build_pr_body(feature_title, doc_page, impacted_edits, "docs")
+                results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {feature_title}", pr_body)
+            except Exception as e:
+                results["errors"].append(f"Docs repo failed: {e}")
 
         return results
 
