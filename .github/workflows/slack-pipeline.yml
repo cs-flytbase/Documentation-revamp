@@ -159,8 +159,21 @@ jobs:
           import json, os, urllib.request
 
           token = os.environ['SLACK_BOT_TOKEN']
-          channel = '${{ github.event.client_payload.slack_channel }}'
-          thread_ts = '${{ github.event.client_payload.slack_thread_ts }}'
+
+          # Fetch Slack channel/thread info from KV
+          content_key = '${{ steps.payload.outputs.content_key }}'
+          worker_url = '${{ steps.payload.outputs.worker_url }}'
+          channel = ''
+          thread_ts = ''
+          try:
+              kv_url = f'{worker_url}/content?key={content_key}'
+              req = urllib.request.Request(kv_url, headers={'User-Agent': 'FlytBase-Pipeline/1.0'})
+              with urllib.request.urlopen(req) as resp:
+                  kv_data = json.loads(resp.read().decode())
+              channel = kv_data.get('slack_channel', '')
+              thread_ts = kv_data.get('slack_thread_ts', '')
+          except Exception as e:
+              print(f'Could not fetch Slack info from KV: {e}')
 
           # Read PR results
           pr_results = {}
