@@ -144,8 +144,15 @@ jobs:
           result = run_pipeline(bundle_dir, mode=mode)
           print(f'[Slack Pipeline] Pipeline result: {result.get(\"status\", \"unknown\")}')
 
-          # Save PR URLs for the notification step
+          # Save PR URLs and file paths for the notification step
           pr_results = result.get('pr_results', {})
+          # Add file path info from the draft
+          draft = result.get('draft', {}) if 'draft' in result else {}
+          rn = draft.get('release_note', {}) if draft else {}
+          dp = draft.get('doc_page', {}) if draft else {}
+          pr_results['release_note_file'] = f'{release_month}/{rn.get(\"filename\", \"\")}' if rn.get('filename') else ''
+          pr_results['doc_page_file'] = dp.get('filename', '')
+          pr_results['release_month'] = release_month
           with open('pr_results.json', 'w') as f:
               json.dump(pr_results, f)
           "
@@ -187,17 +194,24 @@ jobs:
           errors = pr_results.get('errors', [])
 
           # Build message
+          rn_file = pr_results.get('release_note_file', '')
+          dp_file = pr_results.get('doc_page_file', '')
+
           lines = []
           if releases_pr:
-              lines.append(f'✅ Release Note PR: {releases_pr}')
+              lines.append(f':white_check_mark: *Release Note PR:* {releases_pr}')
+              if rn_file:
+                  lines.append(f'  File: `{rn_file}` in FlytBaseAILabs/flytbase-releases')
           if docs_pr:
-              lines.append(f'✅ Doc Page PR: {docs_pr}')
+              lines.append(f':white_check_mark: *Doc Page PR:* {docs_pr}')
+              if dp_file:
+                  lines.append(f'  File: `{dp_file}` in FlytBaseAILabs/flytbase-docs')
           if errors:
-              lines.append('⚠️ Errors:')
+              lines.append(':warning: *Errors:*')
               for e in errors:
                   lines.append(f'  • {e}')
           if not lines:
-              lines.append('❌ Pipeline completed but no PRs were created. Check the Actions log for details.')
+              lines.append(':x: Pipeline completed but no PRs were created. Check the Actions log.')
 
           lines.append('')
           lines.append('Want me to change anything?')

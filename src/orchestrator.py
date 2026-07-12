@@ -399,6 +399,7 @@ def run_pipeline(bundle_path: str, mode: str = "both") -> dict:
         "validation_warnings": validation_warnings,
         "verification": verification_result,
         "pr_results": pr_results,
+        "draft": draft_result,
     }
 
 
