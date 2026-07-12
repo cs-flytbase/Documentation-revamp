@@ -63,7 +63,7 @@ jobs:
           print('=' * 60)
           print(f'[Slack Pipeline] Fetching content from KV: {content_key}')
           kv_url = f'{worker_url}/content?key={content_key}'
-          req = urllib.request.Request(kv_url)
+          req = urllib.request.Request(kv_url, headers={'User-Agent': 'FlytBase-Pipeline/1.0'})
           with urllib.request.urlopen(req) as resp:
               kv_data = json.loads(resp.read().decode())
 
