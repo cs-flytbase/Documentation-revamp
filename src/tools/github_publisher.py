@@ -74,6 +74,148 @@ class GitHubPublisher:
             payload["sha"] = existing_sha
         self._api("PUT", repo, f"contents/{file_path}", json=payload)
 
+    def _compress_gif(self, file_path: str, target_mb: int = 20) -> bytes:
+        """Compress a GIF to fit under the target size.
+
+        Reduces frames (skips every other), scales down resolution, and
+        reduces color palette until the file fits.
+        """
+        from PIL import Image
+        import io
+
+        img = Image.open(file_path)
+        total_frames = getattr(img, "n_frames", 1)
+        original_size = Path(file_path).stat().st_size
+        print(f"    Compressing GIF: {Path(file_path).name} ({original_size / 1024 / 1024:.1f}MB, {total_frames} frames)")
+
+        # Step 1: Extract frames, skip every other one
+        frames = []
+        durations = []
+        skip = max(1, total_frames // 60)  # Keep max ~60 frames
+        for i in range(0, total_frames, skip):
+            img.seek(i)
+            frame = img.convert("RGBA")
+            durations.append(img.info.get("duration", 100) * skip)
+            frames.append(frame)
+
+        # Step 2: Scale down if needed
+        width, height = frames[0].size
+        scale = 1.0
+        if original_size > target_mb * 2 * 1024 * 1024:
+            scale = 0.5
+        elif original_size > target_mb * 1024 * 1024:
+            scale = 0.7
+
+        if scale < 1.0:
+            new_w, new_h = int(width * scale), int(height * scale)
+            frames = [f.resize((new_w, new_h), Image.LANCZOS) for f in frames]
+            print(f"    Scaled: {width}x{height} → {new_w}x{new_h}")
+
+        # Step 3: Convert to palette mode and save with optimization
+        palette_frames = []
+        for f in frames:
+            p = f.convert("RGB").quantize(colors=128)
+            palette_frames.append(p)
+
+        buf = io.BytesIO()
+        palette_frames[0].save(
+            buf, format="GIF", save_all=True,
+            append_images=palette_frames[1:],
+            duration=durations, loop=0, optimize=True,
+        )
+        compressed = buf.getvalue()
+        print(f"    Compressed: {original_size / 1024 / 1024:.1f}MB → {len(compressed) / 1024 / 1024:.1f}MB ({len(palette_frames)} frames)")
+        return compressed
+
+    def _upload_asset_via_blobs(self, repo: str, file_path: str, content_bytes: bytes,
+                                branch: str, commit_message: str) -> None:
+        """Upload a file using GitHub's Git Blobs API (supports up to 100MB).
+
+        Falls back to this when the Contents API rejects large files.
+        """
+        # Step 1: Create a blob
+        blob_b64 = base64.b64encode(content_bytes).decode("utf-8")
+        blob = self._api("POST", repo, "git/blobs", json={
+            "content": blob_b64,
+            "encoding": "base64",
+        })
+        blob_sha = blob["sha"]
+
+        # Step 2: Get the latest commit and tree
+        branch_data = self._api("GET", repo, f"git/ref/heads/{branch}")
+        commit_sha = branch_data["object"]["sha"]
+        commit_data = self._api("GET", repo, f"git/commits/{commit_sha}")
+        tree_sha = commit_data["tree"]["sha"]
+
+        # Step 3: Create a new tree with the file
+        new_tree = self._api("POST", repo, "git/trees", json={
+            "base_tree": tree_sha,
+            "tree": [{
+                "path": file_path,
+                "mode": "100644",
+                "type": "blob",
+                "sha": blob_sha,
+            }],
+        })
+
+        # Step 4: Create a new commit
+        new_commit = self._api("POST", repo, "git/commits", json={
+            "message": commit_message,
+            "tree": new_tree["sha"],
+            "parents": [commit_sha],
+        })
+
+        # Step 5: Update the branch reference
+        self._api("PATCH", repo, f"git/refs/heads/{branch}", json={
+            "sha": new_commit["sha"],
+        })
+
+    def _upload_asset(self, repo: str, asset_path: str, target_path: str,
+                      branch: str, feature_slug: str) -> str | None:
+        """Upload an asset file to GitHub. Handles compression and fallback.
+
+        Returns None on success, error string on failure.
+        """
+        asset_name = Path(asset_path).name
+        file_size = Path(asset_path).stat().st_size
+        is_gif = asset_name.lower().endswith(".gif")
+        max_contents_api = 25 * 1024 * 1024  # 25MB for Contents API
+
+        try:
+            # Step 1: Compress GIF if too large
+            if is_gif and file_size > max_contents_api:
+                print(f"    GIF too large for Contents API ({file_size / 1024 / 1024:.1f}MB), compressing...")
+                content_bytes = self._compress_gif(asset_path)
+            else:
+                content_bytes = Path(asset_path).read_bytes()
+
+            # Step 2: Try Contents API first
+            if len(content_bytes) <= max_contents_api:
+                asset_b64 = base64.b64encode(content_bytes).decode("utf-8")
+                try:
+                    self._api("PUT", repo, f"contents/{target_path}/{asset_name}", json={
+                        "message": f"docs: add assets for {feature_slug}",
+                        "content": asset_b64,
+                        "branch": branch,
+                    })
+                    return None  # Success
+                except requests.HTTPError as e:
+                    if e.response.status_code in (422, 413):
+                        print(f"    Contents API rejected {asset_name}, falling back to Blobs API...")
+                    else:
+                        raise
+
+            # Step 3: Fallback to Blobs API
+            print(f"    Using Blobs API for {asset_name} ({len(content_bytes) / 1024 / 1024:.1f}MB)...")
+            self._upload_asset_via_blobs(
+                repo, f"{target_path}/{asset_name}", content_bytes,
+                branch, f"docs: add assets for {feature_slug}",
+            )
+            return None  # Success
+
+        except Exception as e:
+            return f"Asset upload failed ({asset_name}): {e}"
+
     def _url_to_repo_path(self, source_url: str) -> tuple[str, str]:
         """Convert a source URL to (repo, file_path).
 
@@ -260,14 +402,9 @@ class GitHubPublisher:
                     self._update_summary(RELEASES_REPO, branch, section_title, file_path, feature_title)
 
                     for asset_path in bundle_asset_paths:
-                        asset_name = Path(asset_path).name
-                        asset_b64 = base64.b64encode(Path(asset_path).read_bytes()).decode("utf-8")
-                        try:
-                            self._api("PUT", RELEASES_REPO, f"contents/{release_month}/assets/{asset_name}", json={
-                                "message": f"docs: add assets for {feature_slug}", "content": asset_b64, "branch": branch,
-                            })
-                        except requests.HTTPError as e:
-                            results["errors"].append(f"Asset upload failed ({asset_name}): {e}")
+                        err = self._upload_asset(RELEASES_REPO, asset_path, f"{release_month}/assets", branch, feature_slug)
+                        if err:
+                            results["errors"].append(err)
 
                 for edit in impacted_edits:
                     url = edit.get("source_url", "")
@@ -309,14 +446,9 @@ class GitHubPublisher:
                         self._update_summary(DOCS_REPO, branch, parent_section.split(" > ")[-1], file_path, feature_title)
 
                     for asset_path in bundle_asset_paths:
-                        asset_name = Path(asset_path).name
-                        asset_b64 = base64.b64encode(Path(asset_path).read_bytes()).decode("utf-8")
-                        try:
-                            self._api("PUT", DOCS_REPO, f"contents/{target_path}/assets/{asset_name}", json={
-                                "message": f"docs: add assets for {feature_slug}", "content": asset_b64, "branch": branch,
-                            })
-                        except requests.HTTPError as e:
-                            results["errors"].append(f"Asset upload failed ({asset_name}): {e}")
+                        err = self._upload_asset(DOCS_REPO, asset_path, f"{target_path}/assets", branch, feature_slug)
+                        if err:
+                            results["errors"].append(err)
 
                 for edit in impacted_edits:
                     url = edit.get("source_url", "")
