@@ -145,14 +145,14 @@ jobs:
           print(f'[Slack Pipeline] Pipeline result: {result.get(\"status\", \"unknown\")}')
 
           # Save PR URLs and file paths for the notification step
+          from datetime import datetime
+          release_month = datetime.now().strftime('%B-%Y').lower()
           pr_results = result.get('pr_results', {})
-          # Add file path info from the draft
           draft = result.get('draft', {}) if 'draft' in result else {}
           rn = draft.get('release_note', {}) if draft else {}
           dp = draft.get('doc_page', {}) if draft else {}
           pr_results['release_note_file'] = f'{release_month}/{rn.get(\"filename\", \"\")}' if rn.get('filename') else ''
           pr_results['doc_page_file'] = dp.get('filename', '')
-          pr_results['release_month'] = release_month
           with open('pr_results.json', 'w') as f:
               json.dump(pr_results, f)
           "
