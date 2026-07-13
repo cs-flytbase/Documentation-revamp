@@ -44,12 +44,16 @@ Voice rules:
 - No marketing language. No "revolutionary", "seamless", "cutting-edge".
 - State limitations honestly.
 
-IMAGE PLACEMENT:
-- You receive an ASSET MAP showing each image, its description, and which section it belongs to.
-- Use this syntax: ![descriptive alt text](assets/{filename})
-- Place each image IMMEDIATELY AFTER the paragraph about the thing it shows.
-- The hero image/GIF goes right after the YouTube embed.
-- EVERY provided asset MUST appear in the release note.
+IMAGE PLACEMENT (CRITICAL — read carefully):
+- You receive an ASSET MAP with descriptions, keywords, and context for each image/GIF.
+- Syntax: ![descriptive alt text](assets/{filename})
+- For EACH asset in the ASSET MAP:
+  1. Read its KEYWORDS and CONTEXT
+  2. Find the paragraph in YOUR draft that discusses the same feature/workflow
+  3. Place the image IMMEDIATELY AFTER that paragraph
+- The HERO image goes right after the YouTube embed (or after the H1 title if no YouTube).
+- EVERY provided asset MUST appear in the release note. Count them. If the ASSET MAP has 5 assets, your output must have 5 ![...](assets/...) references.
+- NEVER place an image under an unrelated section. If the image shows "API key configuration", it goes under a setup/configuration section, NOT under "Flyt-Sense Alerts".
 
 FORMATTING:
 - Horizontal rules (---) between every major section.
@@ -130,11 +134,15 @@ Voice rules:
 - Every single detail from the PM doc must appear somewhere in the doc page.
   Nothing is too minor to include if the PM doc mentioned it.
 
-IMAGE PLACEMENT:
-- You receive an ASSET MAP showing each image, its description, and which section it belongs to.
-- Use this syntax: ![descriptive alt text](assets/{filename})
-- EVERY provided asset MUST appear in the doc page.
-- Place each image after the step or section it illustrates.
+IMAGE PLACEMENT (CRITICAL — read carefully):
+- You receive an ASSET MAP with descriptions, keywords, and context for each image/GIF.
+- Syntax: ![descriptive alt text](assets/{filename})
+- For EACH asset in the ASSET MAP:
+  1. Read its KEYWORDS and CONTEXT
+  2. Find the paragraph in YOUR draft that discusses the same feature/workflow
+  3. Place the image IMMEDIATELY AFTER that paragraph
+- EVERY provided asset MUST appear in the doc page. Count them. If the ASSET MAP has 5 assets, your output must have 5 ![...](assets/...) references.
+- NEVER place an image under an unrelated section.
 
 FORMATTING:
 - Horizontal rules (---) between every major section.
@@ -221,34 +229,44 @@ class DraftingAgent(BaseAgent):
         return "\n\n".join(contents) if contents else "No relevant memory files."
 
     def _build_asset_map(self, pm_doc: str, asset_filenames: list[str], vision_output: list[dict]) -> str:
-        """Build asset map using vision agent's section-aware placement."""
-        lines = ["ASSET MAP — where each image should be placed:\n"]
+        """Build content-aware asset map for the drafting agent.
 
-        # Build a lookup from filename to vision output
+        Instead of telling the drafter WHERE to place each image,
+        we tell it WHAT the image shows and let it match to the
+        correct section based on content relevance.
+        """
+        lines = [
+            "ASSET MAP — you MUST place every asset below in the document.",
+            "Read each asset's description and keywords, then place it in the section that discusses the SAME feature/workflow.",
+            "Use syntax: ![alt text](assets/filename)",
+            "DO NOT skip any asset. Every single one must appear in the output.\n",
+        ]
+
         vision_lookup = {}
         for v in vision_output:
             vision_lookup[v.get("file_name", "")] = v
 
-        # Sort assets alphabetically for deterministic ordering
-        sorted_assets = sorted(asset_filenames)
-
-        for i, filename in enumerate(sorted_assets):
+        for i, filename in enumerate(asset_filenames):
             vision = vision_lookup.get(filename, {})
-            desc = vision.get("description", "")
-            section = vision.get("section_heading", "")
-            step_num = vision.get("step_number")
+            desc = vision.get("description", "No description available")
+            keywords = vision.get("content_keywords", [])
+            context = vision.get("feature_context", "")
             is_hero = vision.get("is_hero", False)
+            is_gif = filename.lower().endswith(".gif")
 
-            lines.append(f"Asset {i+1}: {filename}")
+            asset_type = "animated GIF" if is_gif else "screenshot"
+            lines.append(f"Asset {i+1}: {filename} ({asset_type})")
             if is_hero:
-                lines.append("   PLACEMENT: This is the HERO image — place at the very top after YouTube embed")
-            elif section:
-                lines.append(f"   PLACEMENT: Under section '{section}'")
-            if step_num:
-                lines.append(f"   STEP: After step {step_num}")
-            if desc:
-                lines.append(f"   DESCRIPTION: {desc}")
+                lines.append("   ROLE: HERO image — place at the very top, right after the H1 title or YouTube embed")
+            lines.append(f"   SHOWS: {desc}")
+            if keywords:
+                lines.append(f"   KEYWORDS: {', '.join(keywords)}")
+            if context:
+                lines.append(f"   CONTEXT: {context}")
+            lines.append(f"   RULE: Find the section in YOUR draft that discusses {', '.join(keywords[:3]) if keywords else 'this feature'}. Place this asset there.")
             lines.append("")
+
+        lines.append("FINAL CHECK: Count your ![...](assets/...) references. You must have EXACTLY " + str(len(asset_filenames)) + " image references.")
 
         return "\n".join(lines)
 
@@ -462,10 +480,12 @@ Return the corrected doc page as JSON (include impacted_page_edits)."""
         doc_content = result.get("doc_page", {}).get("content", "")
 
         for filename in asset_filenames:
-            if filename not in release_content:
-                warnings.append(f"Asset '{filename}' missing from release note")
-            if filename not in doc_content:
-                warnings.append(f"Asset '{filename}' missing from doc page")
+            # Check for proper image markdown syntax, not just raw filename
+            img_ref = f"](assets/{filename})"
+            if release_content and img_ref not in release_content:
+                warnings.append(f"Asset '{filename}' missing from release note (must use ![alt](assets/{filename}) format)")
+            if doc_content and img_ref not in doc_content:
+                warnings.append(f"Asset '{filename}' missing from doc page (must use ![alt](assets/{filename}) format)")
 
         if youtube_link and youtube_link not in release_content:
             warnings.append("YouTube link not in release note")
