@@ -96,11 +96,16 @@ class VisionAgent(BaseAgent):
             max_tokens=2048,
         )
 
-    def _extract_gif_frames(self, file_path: str, max_frames: int = 6) -> list[tuple[str, str]]:
+    def _extract_gif_frames(self, file_path: str) -> list[tuple[str, str]]:
         """Extract key frames from a GIF and return as base64-encoded PNGs.
 
         Samples frames evenly across the GIF duration so the LLM can
         understand the full workflow being demonstrated.
+
+        Rules:
+        - GIFs > 30 seconds are rejected (too long for meaningful frame sampling)
+        - GIFs > 20 seconds get 10 frames
+        - GIFs <= 20 seconds get 6 frames
         """
         from PIL import Image
         import io
@@ -109,10 +114,29 @@ class VisionAgent(BaseAgent):
         total_frames = getattr(img, "n_frames", 1)
 
         if total_frames <= 1:
-            # Static GIF — treat as a normal image
             return [self._encode_static(file_path)]
 
-        # Pick evenly spaced frame indices
+        # Estimate duration: sum frame durations (in ms)
+        total_duration_ms = 0
+        for i in range(total_frames):
+            img.seek(i)
+            total_duration_ms += img.info.get("duration", 100)
+        duration_seconds = total_duration_ms / 1000
+
+        # Reject GIFs longer than 30 seconds
+        if duration_seconds > 30:
+            print(f"  [Vision] WARNING: GIF {Path(file_path).name} is {duration_seconds:.1f}s — exceeds 30s limit. Using first frame only.")
+            img.seek(0)
+            frame = img.convert("RGBA")
+            buf = io.BytesIO()
+            frame.save(buf, format="PNG")
+            data = base64.b64encode(buf.getvalue()).decode("utf-8")
+            return [(data, "image/png")]
+
+        # 10 frames for >20s, 6 frames for <=20s
+        max_frames = 10 if duration_seconds > 20 else 6
+        print(f"  [Vision] GIF duration: {duration_seconds:.1f}s → extracting {max_frames} frames")
+
         if total_frames <= max_frames:
             indices = list(range(total_frames))
         else:
