@@ -376,6 +376,32 @@ class GitHubPublisher:
             existing_sha=summary_sha,
         )
 
+    def _protect_readme(self, repo: str, branch: str) -> None:
+        """Ensure README.md stays as a clean landing page.
+
+        GitBook uses README.md as the site's home page. Without this guard,
+        new release notes can leak into README.md and replace the landing page
+        with release content. This reads the current README.md from the base
+        branch and re-writes it to the feature branch, ensuring the PR never
+        changes the landing page.
+        """
+        try:
+            readme_content, readme_sha = self._get_file(repo, "README.md", BASE_BRANCH)
+            if readme_content is None:
+                return
+            # Re-write the same README.md to the feature branch so the PR
+            # includes no diff on README.md — even if GitBook tries to change it
+            branch_readme, branch_sha = self._get_file(repo, "README.md", branch)
+            if branch_readme != readme_content and branch_sha:
+                self._write_file(
+                    repo, "README.md", readme_content, branch,
+                    "docs: preserve README.md landing page",
+                    existing_sha=branch_sha,
+                )
+                print(f"    Protected README.md in {repo}")
+        except Exception as e:
+            print(f"    README.md protection skipped: {e}")
+
     def _create_pr(self, repo: str, branch: str, title: str, body: str) -> str:
         """Open a pull request. Returns the PR URL."""
         data = self._api("POST", repo, "pulls", json={
@@ -446,6 +472,9 @@ class GitHubPublisher:
                     except Exception as e:
                         results["errors"].append(f"Failed to patch {url}: {e}")
 
+                # Protect README.md — ensure landing page stays clean
+                self._protect_readme(RELEASES_REPO, branch)
+
                 feature_title = feature_slug.replace("-", " ").title()
                 pr_body = self._build_pr_body(feature_title, release_note, impacted_edits, "releases")
                 results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {feature_title}", pr_body)
@@ -490,6 +519,9 @@ class GitHubPublisher:
                         self._write_file(DOCS_REPO, file_path, patched, branch, f"docs: update {file_path} — cross-reference {feature_slug}", existing_sha=existing_sha)
                     except Exception as e:
                         results["errors"].append(f"Failed to patch {url}: {e}")
+
+                # Protect README.md — ensure landing page stays clean
+                self._protect_readme(DOCS_REPO, branch)
 
                 feature_title = feature_slug.replace("-", " ").title()
                 pr_body = self._build_pr_body(feature_title, doc_page, impacted_edits, "docs")
