@@ -20,6 +20,68 @@ from src.agents.drafting import DraftingAgent
 from src.agents.verification import VerificationAgent
 
 
+def _save_feature_note(draft_result: dict, research_result: dict, pm_doc: str, bundle_name: str) -> None:
+    """Auto-generate a feature note from pipeline results.
+
+    Saves key concepts, terminology, and placement info to memory/features/
+    so the drafting agent has feature context on future runs.
+    """
+    features_dir = PROJECT_ROOT / "memory" / "features"
+    features_dir.mkdir(parents=True, exist_ok=True)
+
+    slug = bundle_name.lower().replace(" ", "-")
+    note_path = features_dir / f"{slug}.md"
+
+    # Extract key info
+    rn = draft_result.get("release_note", {})
+    dp = draft_result.get("doc_page", {})
+    target_ia = research_result.get("target_ia_node", {})
+    feature_summary = research_result.get("feature_summary", "")
+    impacted = research_result.get("impacted_pages", [])
+
+    feature_title = slug.replace("-", " ").title()
+
+    lines = [
+        f"# {feature_title}",
+        "",
+        f"*Auto-generated on {datetime.now().strftime('%Y-%m-%d')} from pipeline run.*",
+        "",
+        "## Summary",
+        "",
+        feature_summary or f"Feature documented from bundle: {bundle_name}",
+        "",
+        "## Placement",
+        "",
+        f"- IA Node: {target_ia.get('id', 'unknown')} ({target_ia.get('label', '')})",
+        f"- Reasoning: {target_ia.get('reasoning', '')}",
+        "",
+    ]
+
+    if impacted:
+        lines += ["## Related Pages", ""]
+        for page in impacted[:5]:
+            lines.append(f"- {page.get('source_url', '')} ({page.get('impact_type', '')})")
+        lines.append("")
+
+    # Extract key terms from the PM doc (first 3 lines of specs table if present)
+    if "| Component" in pm_doc or "| Feature" in pm_doc:
+        lines += ["## Key Specifications", ""]
+        for line in pm_doc.split("\n"):
+            if line.strip().startswith("|") and "---" not in line:
+                lines.append(line.strip())
+        lines.append("")
+
+    lines += [
+        "## Files",
+        "",
+        f"- Release note: {rn.get('filename', 'N/A')}",
+        f"- Doc page: {dp.get('filename', 'N/A')}",
+    ]
+
+    note_path.write_text("\n".join(lines) + "\n")
+    print(f"  [Memory] Saved feature note: {note_path.name}")
+
+
 def validate_input_bundle(bundle_path: str) -> dict:
     """Validate the input bundle. Flexible naming — accepts any .md as source doc."""
     path = Path(bundle_path)
@@ -386,6 +448,9 @@ def run_pipeline(bundle_path: str, mode: str = "both") -> dict:
                     print(f"      - {e}")
         except Exception as e:
             print(f"    GitHub publish failed: {e}")
+
+    # Step 8: Auto-generate feature note for memory system
+    _save_feature_note(draft_result, research_result, pm_doc, Path(bundle_path).name)
 
     print(f"\n{'=' * 60}")
     print(f"Pipeline complete!")

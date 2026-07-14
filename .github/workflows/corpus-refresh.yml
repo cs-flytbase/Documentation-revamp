@@ -1,0 +1,70 @@
+name: Corpus Refresh (Weekly)
+
+on:
+  schedule:
+    # Every Sunday at 12:00 PM UTC
+    - cron: '0 12 * * 0'
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'Which source to refresh (all, docs, releases)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - docs
+          - releases
+      full_rescrape:
+        description: 'Force full re-scrape (not incremental)?'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  refresh-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create .env from secrets
+        run: |
+          cat > .env << ENVEOF
+          PINECONE_API_KEY=${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME=flytbase-docs
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          LLM_PROVIDER=openai
+          ENVEOF
+
+      - name: Set source parameter
+        id: params
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "source=${{ inputs.source }}" >> $GITHUB_OUTPUT
+            echo "full=${{ inputs.full_rescrape }}" >> $GITHUB_OUTPUT
+          else
+            echo "source=all" >> $GITHUB_OUTPUT
+            echo "full=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run corpus refresh
+        run: |
+          if [ "${{ steps.params.outputs.full }}" = "true" ]; then
+            echo "Running FULL re-scrape..."
+            python -m src.ingest --source ${{ steps.params.outputs.source }}
+          else
+            echo "Running incremental refresh..."
+            python -m src.ingest --refresh --source ${{ steps.params.outputs.source }}
+          fi

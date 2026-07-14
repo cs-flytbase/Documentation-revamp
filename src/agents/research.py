@@ -7,6 +7,9 @@ One-shot agent. Receives PM doc text, returns:
 """
 
 import json
+import math
+import re
+from collections import Counter
 from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
@@ -105,11 +108,41 @@ PM Document:
         except json.JSONDecodeError:
             return [pm_doc[:200], f"{product_area} release notes updates"]
 
-    def _search_corpus(self, queries: list[str], top_k_per_query: int = 15) -> list[dict]:
-        """Run multiple queries against Pinecone and deduplicate results."""
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
+        """Simple whitespace + punctuation tokenizer for BM25."""
+        return re.findall(r'\w+', text.lower())
+
+    @staticmethod
+    def _bm25_score(query_tokens: list[str], doc_tokens: list[str],
+                    avg_dl: float, n_docs: int, df: dict[str, int],
+                    k1: float = 1.5, b: float = 0.75) -> float:
+        """BM25 score for a single document against a query."""
+        doc_len = len(doc_tokens)
+        tf = Counter(doc_tokens)
+        score = 0.0
+        for term in query_tokens:
+            if term not in tf:
+                continue
+            term_tf = tf[term]
+            term_df = df.get(term, 0)
+            idf = math.log((n_docs - term_df + 0.5) / (term_df + 0.5) + 1)
+            numerator = term_tf * (k1 + 1)
+            denominator = term_tf + k1 * (1 - b + b * doc_len / max(avg_dl, 1))
+            score += idf * numerator / denominator
+        return score
+
+    def _hybrid_search(self, queries: list[str], top_k_per_query: int = 15) -> list[dict]:
+        """Hybrid search: vector search + BM25 reranking with reciprocal rank fusion.
+
+        1. Run vector search via Pinecone for each query
+        2. Score the returned chunks with BM25 against all queries
+        3. Combine vector rank and BM25 rank via reciprocal rank fusion
+        """
         model = self._get_embed_model()
         all_results = {}
 
+        # Step 1: Vector search (same as before)
         for query in queries:
             embedding = model.encode(query, normalize_embeddings=True).tolist()
             results = search(embedding, top_k=top_k_per_query)
@@ -118,8 +151,49 @@ PM Document:
                 if chunk_id not in all_results or r["score"] > all_results[chunk_id]["score"]:
                     all_results[chunk_id] = r
 
-        sorted_results = sorted(all_results.values(), key=lambda x: x["score"], reverse=True)
-        return sorted_results[:30]
+        if not all_results:
+            return []
+
+        # Step 2: BM25 scoring on retrieved chunks
+        chunks = list(all_results.values())
+        doc_texts = [r["metadata"].get("content", "") for r in chunks]
+        doc_token_lists = [self._tokenize(t) for t in doc_texts]
+
+        # Compute document frequency for BM25
+        n_docs = len(chunks)
+        avg_dl = sum(len(d) for d in doc_token_lists) / max(n_docs, 1)
+        df: dict[str, int] = {}
+        for tokens in doc_token_lists:
+            for term in set(tokens):
+                df[term] = df.get(term, 0) + 1
+
+        # Combined query tokens
+        all_query_tokens = []
+        for q in queries:
+            all_query_tokens.extend(self._tokenize(q))
+
+        bm25_scores = []
+        for doc_tokens in doc_token_lists:
+            score = self._bm25_score(all_query_tokens, doc_tokens, avg_dl, n_docs, df)
+            bm25_scores.append(score)
+
+        # Step 3: Reciprocal Rank Fusion (RRF)
+        # Sort by vector score for vector ranking
+        vector_ranking = sorted(range(len(chunks)), key=lambda i: chunks[i]["score"], reverse=True)
+        # Sort by BM25 score for keyword ranking
+        bm25_ranking = sorted(range(len(chunks)), key=lambda i: bm25_scores[i], reverse=True)
+
+        k = 60  # RRF constant
+        rrf_scores = [0.0] * len(chunks)
+        for rank, idx in enumerate(vector_ranking):
+            rrf_scores[idx] += 1.0 / (k + rank + 1)
+        for rank, idx in enumerate(bm25_ranking):
+            rrf_scores[idx] += 1.0 / (k + rank + 1)
+
+        # Sort by combined RRF score
+        final_ranking = sorted(range(len(chunks)), key=lambda i: rrf_scores[i], reverse=True)
+
+        return [chunks[i] for i in final_ranking[:30]]
 
     def _product_area_sweep(self, product_area: str, top_k: int = 25) -> list[dict]:
         """Broad sweep: find all corpus pages related to this product area by URL/label match."""
@@ -154,8 +228,8 @@ PM Document:
         # Step 2: Generate sub-queries (includes a broad product area sweep query)
         sub_queries = self._generate_sub_queries(pm_doc, product_area)
 
-        # Step 3: Semantic search across all sub-queries
-        corpus_results = self._search_corpus(sub_queries)
+        # Step 3: Hybrid search (vector + BM25) across all sub-queries
+        corpus_results = self._hybrid_search(sub_queries)
 
         # Step 4: Dedicated product area sweep — catches pages that scored low on semantics
         sweep_results = self._product_area_sweep(product_area)

@@ -16,7 +16,7 @@ from sentence_transformers import SentenceTransformer
 
 from src.config import SETTINGS, PROJECT_ROOT
 from src.tools.scraper import scrape_and_chunk
-from src.tools.corpus_store import ensure_index, upsert_chunks, get_stats
+from src.tools.corpus_store import ensure_index, upsert_chunks, get_stats, get_existing_source_urls, delete_by_source_url
 
 
 # -- URL lists (from sitemaps, hardcoded for reliability) --
@@ -321,9 +321,150 @@ def run_ingestion(source: str = "all", test_mode: bool = False):
     print("\nDone!")
 
 
+def discover_sitemap_urls(base_url: str) -> list[str]:
+    """Discover all page URLs from a GitBook-powered site's sitemap.
+
+    Falls back to the hardcoded URL list if sitemap parsing fails.
+    """
+    import requests
+    from bs4 import BeautifulSoup
+
+    sitemap_url = f"{base_url.rstrip('/')}/sitemap.xml"
+    try:
+        resp = requests.get(sitemap_url, timeout=15, headers={"User-Agent": "FlytBase-Ingestion/1.0"})
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "lxml-xml")
+        urls = [loc.text.strip() for loc in soup.find_all("loc") if loc.text.strip()]
+        if urls:
+            print(f"  Discovered {len(urls)} URLs from sitemap: {sitemap_url}")
+            return urls
+    except Exception as e:
+        print(f"  Could not fetch sitemap {sitemap_url}: {e}")
+
+    return []
+
+
+def run_incremental_refresh(source: str = "all"):
+    """Incremental corpus refresh — only scrape and embed NEW or CHANGED pages.
+
+    Compares current sitemap URLs against what's already in Pinecone.
+    Only processes pages that are new (not in Pinecone) or have been updated.
+
+    Usage:
+        python -m src.ingest --refresh
+        python -m src.ingest --refresh --source docs
+        python -m src.ingest --refresh --source releases
+    """
+    print("=" * 60)
+    print("FlytBase Corpus Refresh (Incremental)")
+    print("=" * 60)
+
+    ensure_index()
+
+    # Step 1: Get URLs already in Pinecone
+    print("\n--- Checking existing corpus ---")
+    existing_urls = get_existing_source_urls()
+    print(f"  Found {len(existing_urls)} URLs already in Pinecone")
+
+    # Step 2: Discover current URLs from sitemaps + hardcoded lists
+    new_urls_to_scrape = []
+
+    if source in ("all", "docs"):
+        sitemap_urls = discover_sitemap_urls("https://docs.flytbase.com")
+        # Merge sitemap with hardcoded list (sitemap may have new pages)
+        all_doc_urls = list(set(DOCS_URLS + sitemap_urls))
+        new_docs = [u for u in all_doc_urls if u not in existing_urls]
+        print(f"\n--- docs.flytbase.com ---")
+        print(f"  Total known URLs: {len(all_doc_urls)}")
+        print(f"  Already in corpus: {len(all_doc_urls) - len(new_docs)}")
+        print(f"  New URLs to scrape: {len(new_docs)}")
+        for u in new_docs:
+            new_urls_to_scrape.append((u, "doc"))
+
+    if source in ("all", "releases"):
+        sitemap_urls = discover_sitemap_urls("https://releases.flytbase.com")
+        all_release_urls = list(set(RELEASES_URLS + sitemap_urls))
+        new_releases = [u for u in all_release_urls if u not in existing_urls]
+        print(f"\n--- releases.flytbase.com ---")
+        print(f"  Total known URLs: {len(all_release_urls)}")
+        print(f"  Already in corpus: {len(all_release_urls) - len(new_releases)}")
+        print(f"  New URLs to scrape: {len(new_releases)}")
+        for u in new_releases:
+            new_urls_to_scrape.append((u, "release"))
+
+    if not new_urls_to_scrape:
+        print("\n✅ Corpus is up to date. No new pages to ingest.")
+        stats = get_stats()
+        print(f"  Total vectors: {stats.total_vector_count}")
+        return
+
+    # Step 3: Scrape only the new URLs
+    print(f"\n--- Scraping {len(new_urls_to_scrape)} new pages ---")
+    all_chunks = []
+
+    # Group by source_type for batch scraping
+    doc_urls = [u for u, t in new_urls_to_scrape if t == "doc"]
+    release_urls = [u for u, t in new_urls_to_scrape if t == "release"]
+
+    if doc_urls:
+        chunks = scrape_and_chunk(doc_urls, source_type="doc")
+        print(f"  Extracted {len(chunks)} chunks from {len(doc_urls)} new doc pages")
+        all_chunks.extend(chunks)
+
+    if release_urls:
+        chunks = scrape_and_chunk(release_urls, source_type="release")
+        print(f"  Extracted {len(chunks)} chunks from {len(release_urls)} new release pages")
+        all_chunks.extend(chunks)
+
+    if not all_chunks:
+        print("\nNo content extracted from new pages.")
+        return
+
+    # Step 4: Embed new chunks
+    print(f"\n--- Embedding {len(all_chunks)} new chunks ---")
+    texts = [chunk["content"] for chunk in all_chunks]
+    embeddings = embed_texts(texts)
+    print(f"  Got {len(embeddings)} embeddings")
+
+    # Step 5: Prepare and upsert
+    vectors = []
+    for chunk, embedding in zip(all_chunks, embeddings):
+        vectors.append({
+            "id": chunk["chunk_id"],
+            "values": embedding,
+            "metadata": {
+                "content": chunk["content"][:8000],
+                "ia_node": chunk["ia_node"],
+                "ia_label": chunk["ia_label"],
+                "source_type": chunk["source_type"],
+                "source_url": chunk["source_url"],
+                "source_date": extract_source_date(chunk["source_url"]),
+                "feature_tags": chunk["feature_tags"],
+                "heading": chunk["heading"],
+            },
+        })
+
+    print(f"\n--- Upserting {len(vectors)} new vectors to Pinecone ---")
+    count = upsert_chunks(vectors)
+    print(f"  Upserted {count} vectors")
+
+    # Final stats
+    time.sleep(2)
+    stats = get_stats()
+    print(f"\n--- Index stats ---")
+    print(f"  Total vectors: {stats.total_vector_count}")
+    print(f"  Dimension: {stats.dimension}")
+    print(f"\n✅ Incremental refresh complete! Added {count} new vectors.")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest FlytBase docs into Pinecone")
     parser.add_argument("--source", choices=["all", "docs", "releases"], default="all")
     parser.add_argument("--test", action="store_true", help="Test mode: only first 10 pages")
+    parser.add_argument("--refresh", action="store_true",
+                        help="Incremental refresh: only scrape new/changed pages")
     args = parser.parse_args()
-    run_ingestion(source=args.source, test_mode=args.test)
+    if args.refresh:
+        run_incremental_refresh(source=args.source)
+    else:
+        run_ingestion(source=args.source, test_mode=args.test)

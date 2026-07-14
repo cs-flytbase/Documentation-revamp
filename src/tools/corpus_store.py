@@ -99,3 +99,59 @@ def get_stats() -> dict:
     """Return index stats (total vector count, namespaces, etc.)."""
     index = get_index()
     return index.describe_index_stats()
+
+
+def get_existing_source_urls(namespace: str = "") -> set[str]:
+    """Fetch all unique source_url values already in Pinecone.
+
+    Uses a zero-vector query with a large top_k to retrieve metadata.
+    Since Pinecone doesn't support listing all vectors natively on Starter,
+    we query with a dummy vector and iterate.
+    """
+    index = get_index()
+    dim = SETTINGS["pinecone"]["embedding_dimension"]
+    urls = set()
+
+    # Query with zero vector to get a broad sample — repeat for each source_type
+    for source_type in ("doc", "release"):
+        try:
+            results = index.query(
+                vector=[0.0] * dim,
+                top_k=10000,
+                include_metadata=True,
+                filter={"source_type": {"$eq": source_type}},
+                namespace=namespace,
+            )
+            for match in results.matches:
+                url = match.metadata.get("source_url", "")
+                if url:
+                    urls.add(url)
+        except Exception as e:
+            print(f"  Warning: Could not query existing URLs for {source_type}: {e}")
+
+    return urls
+
+
+def delete_by_source_url(source_url: str, namespace: str = "") -> int:
+    """Delete all vectors with a given source_url.
+
+    Used during incremental refresh to remove stale chunks before re-upserting.
+    """
+    index = get_index()
+    dim = SETTINGS["pinecone"]["embedding_dimension"]
+
+    # Find vectors with this source_url
+    results = index.query(
+        vector=[0.0] * dim,
+        top_k=1000,
+        include_metadata=True,
+        filter={"source_url": {"$eq": source_url}},
+        namespace=namespace,
+    )
+
+    if not results.matches:
+        return 0
+
+    ids = [m.id for m in results.matches]
+    index.delete(ids=ids, namespace=namespace)
+    return len(ids)

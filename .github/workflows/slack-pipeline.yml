@@ -201,11 +201,11 @@ jobs:
           if releases_pr:
               lines.append(f':white_check_mark: *Release Note PR:* {releases_pr}')
               if rn_file:
-                  lines.append(f'  File: `{rn_file}` in FlytBaseAILabs/flytbase-releases')
+                  lines.append('  File: ' + chr(96) + rn_file + chr(96) + ' in FlytBaseAILabs/flytbase-releases')
           if docs_pr:
               lines.append(f':white_check_mark: *Doc Page PR:* {docs_pr}')
               if dp_file:
-                  lines.append(f'  File: `{dp_file}` in FlytBaseAILabs/flytbase-docs')
+                  lines.append('  File: ' + chr(96) + dp_file + chr(96) + ' in FlytBaseAILabs/flytbase-docs')
           if errors:
               lines.append(':warning: *Errors:*')
               for e in errors:

@@ -98,13 +98,15 @@ class GitHubPublisher:
             durations.append(img.info.get("duration", 100) * skip)
             frames.append(frame)
 
-        # Step 2: Scale down if needed
+        # Step 2: Scale down if needed — aggressive scaling for large files
         width, height = frames[0].size
         scale = 1.0
-        if original_size > target_mb * 2 * 1024 * 1024:
-            scale = 0.5
+        if original_size > target_mb * 4 * 1024 * 1024:
+            scale = 0.35  # 80MB+ → 35% scale
+        elif original_size > target_mb * 2 * 1024 * 1024:
+            scale = 0.5   # 40MB+ → 50% scale
         elif original_size > target_mb * 1024 * 1024:
-            scale = 0.7
+            scale = 0.65  # 20MB+ → 65% scale
 
         if scale < 1.0:
             new_w, new_h = int(width * scale), int(height * scale)
@@ -171,25 +173,48 @@ class GitHubPublisher:
         })
 
     def _upload_asset(self, repo: str, asset_path: str, target_path: str,
-                      branch: str, feature_slug: str) -> str | None:
+                      branch: str, feature_slug: str,
+                      precompressed: bytes | None = None) -> str | None:
         """Upload an asset file to GitHub. Handles compression and fallback.
+
+        Args:
+            precompressed: If provided, skip reading/compressing and use these bytes directly.
+                           Used to avoid re-compressing GIFs when uploading to the second repo.
 
         Returns None on success, error string on failure.
         """
         asset_name = Path(asset_path).name
-        file_size = Path(asset_path).stat().st_size
         is_gif = asset_name.lower().endswith(".gif")
-        max_contents_api = 25 * 1024 * 1024  # 25MB for Contents API
+        is_binary = asset_name.lower().endswith((".gif", ".png", ".jpg", ".jpeg", ".webp", ".mp4"))
+        # Contents API is unreliable for binary files > 5MB due to base64 inflation
+        max_contents_api = 5 * 1024 * 1024  # 5MB for binary via Contents API
 
         try:
-            # Step 1: Compress GIF if too large
-            if is_gif and file_size > max_contents_api:
-                print(f"    GIF too large for Contents API ({file_size / 1024 / 1024:.1f}MB), compressing...")
-                content_bytes = self._compress_gif(asset_path)
+            # Step 1: Get content bytes
+            if precompressed is not None:
+                content_bytes = precompressed
+                print(f"    Using pre-compressed bytes for {asset_name} ({len(content_bytes) / 1024 / 1024:.1f}MB)")
             else:
-                content_bytes = Path(asset_path).read_bytes()
+                file_size = Path(asset_path).stat().st_size
+                if is_gif and file_size > max_contents_api:
+                    print(f"    GIF too large ({file_size / 1024 / 1024:.1f}MB), compressing...")
+                    content_bytes = self._compress_gif(asset_path)
+                else:
+                    content_bytes = Path(asset_path).read_bytes()
+                # Cache for reuse when uploading to second repo
+                if is_gif and hasattr(self, '_asset_cache'):
+                    self._asset_cache[asset_path] = content_bytes
 
-            # Step 2: Try Contents API first
+            # Step 2: GIFs always use Blobs API — binary files are unreliable via Contents API
+            if is_gif:
+                print(f"    Using Blobs API for GIF {asset_name} ({len(content_bytes) / 1024 / 1024:.1f}MB)...")
+                self._upload_asset_via_blobs(
+                    repo, f"{target_path}/{asset_name}", content_bytes,
+                    branch, f"docs: add assets for {feature_slug}",
+                )
+                return None  # Success
+
+            # Step 3: For non-GIF files, try Contents API if small enough
             if len(content_bytes) <= max_contents_api:
                 asset_b64 = base64.b64encode(content_bytes).decode("utf-8")
                 try:
@@ -199,13 +224,10 @@ class GitHubPublisher:
                         "branch": branch,
                     })
                     return None  # Success
-                except requests.HTTPError as e:
-                    if e.response.status_code in (422, 413):
-                        print(f"    Contents API rejected {asset_name}, falling back to Blobs API...")
-                    else:
-                        raise
+                except requests.HTTPError:
+                    print(f"    Contents API failed for {asset_name}, falling back to Blobs API...")
 
-            # Step 3: Fallback to Blobs API
+            # Step 4: Fallback to Blobs API for large or failed non-GIF files
             print(f"    Using Blobs API for {asset_name} ({len(content_bytes) / 1024 / 1024:.1f}MB)...")
             self._upload_asset_via_blobs(
                 repo, f"{target_path}/{asset_name}", content_bytes,
@@ -380,6 +402,8 @@ class GitHubPublisher:
         branch = f"docs/{feature_slug}-{int(time.time())}"
         output_path = Path(output_dir)
         results = {"docs_pr": None, "releases_pr": None, "errors": []}
+        # Cache compressed GIF bytes so we don't re-compress for the second repo
+        self._asset_cache: dict[str, bytes] = {}
 
         release_note = draft_result.get("release_note", {})
         doc_page = draft_result.get("doc_page", {})
@@ -402,7 +426,8 @@ class GitHubPublisher:
                     self._update_summary(RELEASES_REPO, branch, section_title, file_path, feature_title)
 
                     for asset_path in bundle_asset_paths:
-                        err = self._upload_asset(RELEASES_REPO, asset_path, f"{release_month}/assets", branch, feature_slug)
+                        cached = self._asset_cache.get(asset_path)
+                        err = self._upload_asset(RELEASES_REPO, asset_path, f"{release_month}/assets", branch, feature_slug, precompressed=cached)
                         if err:
                             results["errors"].append(err)
 
@@ -446,7 +471,8 @@ class GitHubPublisher:
                         self._update_summary(DOCS_REPO, branch, parent_section.split(" > ")[-1], file_path, feature_title)
 
                     for asset_path in bundle_asset_paths:
-                        err = self._upload_asset(DOCS_REPO, asset_path, f"{target_path}/assets", branch, feature_slug)
+                        cached = self._asset_cache.get(asset_path)
+                        err = self._upload_asset(DOCS_REPO, asset_path, f"{target_path}/assets", branch, feature_slug, precompressed=cached)
                         if err:
                             results["errors"].append(err)
 
