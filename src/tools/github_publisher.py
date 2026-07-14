@@ -315,8 +315,8 @@ class GitHubPublisher:
           ## Section Title
           * [Page Title](path/to/file.md)
 
-        This finds the section by title and appends the new entry at the end of it.
-        If no matching section is found, appends at the end of the file.
+        If the section doesn't exist, creates it as the first section
+        (most recent month goes on top).
         """
         summary_content, summary_sha = self._get_file(repo, "SUMMARY.md", branch)
         if summary_content is None:
@@ -335,12 +335,12 @@ class GitHubPublisher:
         in_section = False
         for i, line in enumerate(lines):
             # Match section headers (## July 2026, ## May 2026, etc.)
-            if line.strip().startswith("#") and section_title.lower() in line.lower():
+            if line.strip().startswith("## ") and section_title.lower() in line.lower():
                 in_section = True
                 continue
             if in_section:
                 # We're past the section header — look for the end of this section
-                if line.strip().startswith("#"):
+                if line.strip().startswith("## "):
                     # Hit the next section — insert before it
                     insert_idx = i
                     break
@@ -353,19 +353,35 @@ class GitHubPublisher:
                 # Section found but no entries yet — append at end
                 insert_idx = len(lines)
             else:
-                # Section not found — create it at the top (after first line)
+                # Section not found — create it as the FIRST section
                 # Find the first ## heading to insert before it
                 first_section_idx = None
                 for i, line in enumerate(lines):
                     if line.strip().startswith("## "):
                         first_section_idx = i
                         break
+
                 if first_section_idx is not None:
-                    lines.insert(first_section_idx, f"\n## {section_title}\n")
-                    insert_idx = first_section_idx + 1
+                    # Insert new section heading + entry + blank line BEFORE first existing section
+                    lines.insert(first_section_idx, "")
+                    lines.insert(first_section_idx, entry)
+                    lines.insert(first_section_idx, "")
+                    lines.insert(first_section_idx, f"## {section_title}")
+                    lines.insert(first_section_idx, "")
                 else:
-                    lines.append(f"\n## {section_title}")
-                    insert_idx = len(lines)
+                    # No sections exist at all — append at end
+                    lines.append("")
+                    lines.append(f"## {section_title}")
+                    lines.append("")
+                    lines.append(entry)
+
+                updated = "\n".join(lines) + "\n"
+                self._write_file(
+                    repo, "SUMMARY.md", updated, branch,
+                    f"docs: add {page_title} to SUMMARY.md",
+                    existing_sha=summary_sha,
+                )
+                return
 
         lines.insert(insert_idx, entry)
         updated = "\n".join(lines) + "\n"
@@ -377,30 +393,12 @@ class GitHubPublisher:
         )
 
     def _protect_readme(self, repo: str, branch: str) -> None:
-        """Ensure README.md stays as a clean landing page.
+        """No-op. README.md is not used in the releases or docs repos.
 
-        GitBook uses README.md as the site's home page. Without this guard,
-        new release notes can leak into README.md and replace the landing page
-        with release content. This reads the current README.md from the base
-        branch and re-writes it to the feature branch, ensuring the PR never
-        changes the landing page.
+        GitBook navigation is fully controlled by SUMMARY.md.
+        The pipeline never creates or modifies README.md.
         """
-        try:
-            readme_content, readme_sha = self._get_file(repo, "README.md", BASE_BRANCH)
-            if readme_content is None:
-                return
-            # Re-write the same README.md to the feature branch so the PR
-            # includes no diff on README.md — even if GitBook tries to change it
-            branch_readme, branch_sha = self._get_file(repo, "README.md", branch)
-            if branch_readme != readme_content and branch_sha:
-                self._write_file(
-                    repo, "README.md", readme_content, branch,
-                    "docs: preserve README.md landing page",
-                    existing_sha=branch_sha,
-                )
-                print(f"    Protected README.md in {repo}")
-        except Exception as e:
-            print(f"    README.md protection skipped: {e}")
+        pass
 
     def _create_pr(self, repo: str, branch: str, title: str, body: str) -> str:
         """Open a pull request. Returns the PR URL."""
