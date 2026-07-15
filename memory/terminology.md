@@ -11,3 +11,5 @@ Rules for product names, spellings, and capitalization. Applied on every run.
 - [terminology] "Flinks" and "Flows" — always capitalized when referring to the FlytBase features.
 - [terminology] Dock variants: "Dock 1", "Dock 2", "Dock 3" — always capitalize Dock and use the numeral.
 - [terminology] "Smart Missions" — always capitalized as a proper feature name.
+- [2026-07-15] [terminology] "SafeSky" — capital S, capital K, one word. Never "Safesky" or "Safe Sky".
+- [2026-07-15] [terminology] "SkySense" is a "Flex" (FlytBase Flex app), NOT a "Flink". Never refer to SkySense as a Flink.

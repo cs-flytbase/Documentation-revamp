@@ -12,3 +12,5 @@ Appended to by the memory updater when reviewers correct voice/tone issues.
 - [voice] No marketing language — never use "revolutionary", "seamless", "cutting-edge", "best-in-class".
 - [voice] State limitations honestly and directly. Do not soften or omit constraints.
 - [voice] Release notes speak directly to the operator using "you" and "your". Doc pages use imperative voice ("Click", "Navigate to", "Select") without excessive "you".
+- [2026-07-15] [voice] The Feature Introduction section in release notes must be professional, not conversational. Keep the conversational tone for the problem statement and walkthrough, but the feature introduction itself should be factual and direct.
+- [2026-07-15] [voice] The Access section must include detailed information — not just a one-liner. Include how to enable, who to contact, and any prerequisites.
