@@ -14,3 +14,5 @@ Appended to by the memory updater when reviewers correct voice/tone issues.
 - [voice] Release notes speak directly to the operator using "you" and "your". Doc pages use imperative voice ("Click", "Navigate to", "Select") without excessive "you".
 - [2026-07-15] [voice] The Feature Introduction section in release notes must be professional, not conversational. Keep the conversational tone for the problem statement and walkthrough, but the feature introduction itself should be factual and direct.
 - [2026-07-15] [voice] The Access section must include detailed information — not just a one-liner. Include how to enable, who to contact, and any prerequisites.
+
+- [2026-07-15] [voice] Adjust the language to be more professional in the document below the Flex Factory integration caption.
