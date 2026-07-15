@@ -206,7 +206,7 @@ def fetch_exemplar(research_result: dict) -> str:
         return ""
 
 
-def run_pipeline(bundle_path: str, mode: str = "both") -> dict:
+def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "") -> dict:
     """Run the full documentation generation pipeline."""
     print("=" * 60)
     print("FlytBase Documentation Pipeline")
@@ -436,6 +436,8 @@ def run_pipeline(bundle_path: str, mode: str = "both") -> dict:
                 feature_slug=feature_slug,
                 bundle_asset_paths=bundle["asset_paths"],
                 release_month=release_month,
+                requester_name=requester_name,
+                requester_username=requester_username,
                 mode=mode,
             )
             if pr_results.get("releases_pr"):

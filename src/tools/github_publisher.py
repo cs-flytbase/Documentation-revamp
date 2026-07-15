@@ -431,6 +431,8 @@ class GitHubPublisher:
         bundle_asset_paths: list[str],
         release_month: str = "",
         mode: str = "both",
+        requester_name: str = "",
+        requester_username: str = "",
     ) -> dict:
         """Full publish flow: create branches, write files, patch impacted pages, open PRs.
 
@@ -490,7 +492,7 @@ class GitHubPublisher:
 
                 slug_title = feature_slug.replace("-", " ").title()
                 rn_title = self._extract_title(release_note.get("content", ""), slug_title)
-                pr_body = self._build_pr_body(rn_title, release_note, impacted_edits, "releases")
+                pr_body = self._build_pr_body(rn_title, release_note, impacted_edits, "releases", requester_name, requester_username)
                 results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {rn_title}", pr_body)
             except Exception as e:
                 results["errors"].append(f"Releases repo failed: {e}")
@@ -540,14 +542,15 @@ class GitHubPublisher:
 
                 slug_title = feature_slug.replace("-", " ").title()
                 dp_title = self._extract_title(doc_page.get("content", ""), slug_title)
-                pr_body = self._build_pr_body(dp_title, doc_page, impacted_edits, "docs")
+                pr_body = self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username)
                 results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {dp_title}", pr_body)
             except Exception as e:
                 results["errors"].append(f"Docs repo failed: {e}")
 
         return results
 
-    def _build_pr_body(self, feature_title: str, page: dict, impacted_edits: list, repo_type: str) -> str:
+    def _build_pr_body(self, feature_title: str, page: dict, impacted_edits: list, repo_type: str,
+                       requester_name: str = "", requester_username: str = "") -> str:
         is_releases = repo_type == "releases"
         page_type = "Release Note" if is_releases else "Doc Page"
         filename = page.get("filename", "N/A")
@@ -610,8 +613,18 @@ class GitHubPublisher:
 
         lines += [
             "",
-            "**If anything looks wrong**, leave a comment starting with `/feedback` explaining the issue "
+            "**If anything looks wrong**, leave a comment explaining the issue "
             "— the pipeline will learn from it for next time.",
+            "",
+            "---",
+            "",
         ]
+
+        # Attribution footer
+        if requester_name:
+            lines.append(f"**Requested by:** {requester_name} (@{requester_username})")
+        from datetime import datetime
+        lines.append(f"**Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC")
+        lines.append("**Via:** FlytBase Documentation Pipeline")
 
         return "\n".join(lines)

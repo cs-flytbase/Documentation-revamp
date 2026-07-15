@@ -44,6 +44,8 @@ jobs:
           echo "mode=${{ github.event.client_payload.mode }}" >> $GITHUB_OUTPUT
           echo "content_key=${{ github.event.client_payload.content_key }}" >> $GITHUB_OUTPUT
           echo "worker_url=${{ github.event.client_payload.worker_url }}" >> $GITHUB_OUTPUT
+          echo "requester_name=${{ github.event.client_payload.requester_name }}" >> $GITHUB_OUTPUT
+          echo "requester_username=${{ github.event.client_payload.requester_username }}" >> $GITHUB_OUTPUT
 
       - name: Fetch content from Worker KV and run pipeline
         env:
@@ -141,7 +143,9 @@ jobs:
 
           # Step 2: Run the existing pipeline
           print('[Slack Pipeline] Running pipeline...')
-          result = run_pipeline(bundle_dir, mode=mode)
+          requester_name = '${{ steps.payload.outputs.requester_name }}'
+          requester_username = '${{ steps.payload.outputs.requester_username }}'
+          result = run_pipeline(bundle_dir, mode=mode, requester_name=requester_name, requester_username=requester_username)
           print(f'[Slack Pipeline] Pipeline result: {result.get(\"status\", \"unknown\")}')
 
           # Save PR URLs and file paths for the notification step
