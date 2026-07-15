@@ -476,5 +476,9 @@ if __name__ == "__main__":
     parser.add_argument("bundle", help="Path to input bundle directory")
     parser.add_argument("--mode", choices=["both", "release_only", "doc_only"],
                         default="both", help="Output mode")
+    parser.add_argument("--requester-name", default="", help="Name of person who requested this run")
+    parser.add_argument("--requester-username", default="", help="Username of requester")
     args = parser.parse_args()
-    run_pipeline(args.bundle, mode=args.mode)
+    run_pipeline(args.bundle, mode=args.mode,
+                 requester_name=args.requester_name,
+                 requester_username=args.requester_username)

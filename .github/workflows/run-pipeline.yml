@@ -60,6 +60,20 @@ jobs:
           fi
           echo "Running pipeline for bundle: ${{ steps.bundle.outputs.name }}"
 
+      - name: Get requester info
+        id: requester
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            REQUESTER_NAME=$(git log -1 --format='%an')
+            REQUESTER_USERNAME=$(git log -1 --format='%ae' | cut -d'@' -f1)
+          else
+            REQUESTER_NAME="${{ github.actor }}"
+            REQUESTER_USERNAME="${{ github.actor }}"
+          fi
+          echo "name=$REQUESTER_NAME" >> $GITHUB_OUTPUT
+          echo "username=$REQUESTER_USERNAME" >> $GITHUB_OUTPUT
+          echo "Requester: $REQUESTER_NAME ($REQUESTER_USERNAME)"
+
       - name: Create .env from secrets
         run: |
           cat > .env << ENVEOF
@@ -76,7 +90,10 @@ jobs:
           ENVEOF
 
       - name: Run pipeline
-        run: python -m src.orchestrator ./input_bundles/${{ steps.bundle.outputs.name }}
+        run: |
+          python -m src.orchestrator ./input_bundles/${{ steps.bundle.outputs.name }} \
+            --requester-name "${{ steps.requester.outputs.name }}" \
+            --requester-username "${{ steps.requester.outputs.username }}"
 
       - name: Upload pipeline output
         if: always()
