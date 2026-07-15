@@ -13,7 +13,7 @@ from datetime import date
 from pathlib import Path
 
 from src.agents.base import BaseAgent
-from src.config import PROJECT_ROOT
+from src.config import PROJECT_ROOT, get_model_for_agent
 
 ALLOWED_FILES = {"voice_corrections.md", "placement_corrections.md", "formatting_corrections.md", "terminology.md"}
 
@@ -54,7 +54,7 @@ class MemoryUpdater(BaseAgent):
         super().__init__(
             name="memory_updater",
             system_prompt=SYSTEM_PROMPT,
-            model="claude-sonnet-4-6",
+            model=get_model_for_agent("memory_updater"),
             temperature=0.1,
             max_tokens=2048,
         )

@@ -392,6 +392,19 @@ class GitHubPublisher:
             existing_sha=summary_sha,
         )
 
+    @staticmethod
+    def _extract_title(content: str, fallback: str = "") -> str:
+        """Extract the H1 title from markdown content.
+
+        Looks for the first '# ' line (H1 heading) and returns its text.
+        Falls back to the provided fallback if no H1 is found.
+        """
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("# ") and not stripped.startswith("## "):
+                return stripped[2:].strip()
+        return fallback
+
     def _protect_readme(self, repo: str, branch: str) -> None:
         """No-op. README.md is not used in the releases or docs repos.
 
@@ -445,7 +458,9 @@ class GitHubPublisher:
                     file_path = f"{release_month}/{filename}"
                     self._write_file(RELEASES_REPO, file_path, full_content, branch, f"docs: add {feature_slug} release note")
 
-                    feature_title = feature_slug.replace("-", " ").title()
+                    # Use the actual H1 title from the content, not the filename slug
+                    slug_title = feature_slug.replace("-", " ").title()
+                    feature_title = self._extract_title(release_note.get("content", ""), slug_title)
                     section_title = release_month.replace("-", " ").upper()
                     self._update_summary(RELEASES_REPO, branch, section_title, file_path, feature_title)
 
@@ -473,9 +488,10 @@ class GitHubPublisher:
                 # Protect README.md — ensure landing page stays clean
                 self._protect_readme(RELEASES_REPO, branch)
 
-                feature_title = feature_slug.replace("-", " ").title()
-                pr_body = self._build_pr_body(feature_title, release_note, impacted_edits, "releases")
-                results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {feature_title}", pr_body)
+                slug_title = feature_slug.replace("-", " ").title()
+                rn_title = self._extract_title(release_note.get("content", ""), slug_title)
+                pr_body = self._build_pr_body(rn_title, release_note, impacted_edits, "releases")
+                results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {rn_title}", pr_body)
             except Exception as e:
                 results["errors"].append(f"Releases repo failed: {e}")
 
@@ -492,10 +508,11 @@ class GitHubPublisher:
                     file_path = f"{target_path}/{filename}" if target_path else filename
                     self._write_file(DOCS_REPO, file_path, full_content, branch, f"docs: add {feature_slug} doc page")
 
-                    feature_title = feature_slug.replace("-", " ").title()
+                    slug_title = feature_slug.replace("-", " ").title()
+                    doc_title = self._extract_title(doc_page.get("content", ""), slug_title)
                     parent_section = target_path.replace("-", " ").replace("/", " > ").title() if target_path else ""
                     if parent_section:
-                        self._update_summary(DOCS_REPO, branch, parent_section.split(" > ")[-1], file_path, feature_title)
+                        self._update_summary(DOCS_REPO, branch, parent_section.split(" > ")[-1], file_path, doc_title)
 
                     for asset_path in bundle_asset_paths:
                         cached = self._asset_cache.get(asset_path)
@@ -521,9 +538,10 @@ class GitHubPublisher:
                 # Protect README.md — ensure landing page stays clean
                 self._protect_readme(DOCS_REPO, branch)
 
-                feature_title = feature_slug.replace("-", " ").title()
-                pr_body = self._build_pr_body(feature_title, doc_page, impacted_edits, "docs")
-                results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {feature_title}", pr_body)
+                slug_title = feature_slug.replace("-", " ").title()
+                dp_title = self._extract_title(doc_page.get("content", ""), slug_title)
+                pr_body = self._build_pr_body(dp_title, doc_page, impacted_edits, "docs")
+                results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {dp_title}", pr_body)
             except Exception as e:
                 results["errors"].append(f"Docs repo failed: {e}")
 
