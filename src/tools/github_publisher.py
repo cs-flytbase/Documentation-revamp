@@ -433,6 +433,8 @@ class GitHubPublisher:
         mode: str = "both",
         requester_name: str = "",
         requester_username: str = "",
+        slack_channel: str = "",
+        slack_thread_ts: str = "",
     ) -> dict:
         """Full publish flow: create branches, write files, patch impacted pages, open PRs.
 
@@ -492,7 +494,7 @@ class GitHubPublisher:
 
                 slug_title = feature_slug.replace("-", " ").title()
                 rn_title = self._extract_title(release_note.get("content", ""), slug_title)
-                pr_body = self._build_pr_body(rn_title, release_note, impacted_edits, "releases", requester_name, requester_username)
+                pr_body = self._build_pr_body(rn_title, release_note, impacted_edits, "releases", requester_name, requester_username, slack_channel, slack_thread_ts)
                 results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {rn_title}", pr_body)
             except Exception as e:
                 results["errors"].append(f"Releases repo failed: {e}")
@@ -542,7 +544,7 @@ class GitHubPublisher:
 
                 slug_title = feature_slug.replace("-", " ").title()
                 dp_title = self._extract_title(doc_page.get("content", ""), slug_title)
-                pr_body = self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username)
+                pr_body = self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username, slack_channel, slack_thread_ts)
                 results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {dp_title}", pr_body)
             except Exception as e:
                 results["errors"].append(f"Docs repo failed: {e}")
@@ -550,7 +552,8 @@ class GitHubPublisher:
         return results
 
     def _build_pr_body(self, feature_title: str, page: dict, impacted_edits: list, repo_type: str,
-                       requester_name: str = "", requester_username: str = "") -> str:
+                       requester_name: str = "", requester_username: str = "",
+                       slack_channel: str = "", slack_thread_ts: str = "") -> str:
         is_releases = repo_type == "releases"
         page_type = "Release Note" if is_releases else "Doc Page"
         filename = page.get("filename", "N/A")
@@ -626,5 +629,8 @@ class GitHubPublisher:
         from datetime import datetime
         lines.append(f"**Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC")
         lines.append("**Via:** FlytBase Documentation Pipeline")
+        if slack_channel and slack_thread_ts:
+            thread_id = slack_thread_ts.replace(".", "")
+            lines.append(f"**Slack thread:** https://flytbase.slack.com/archives/{slack_channel}/p{thread_id}")
 
         return "\n".join(lines)
