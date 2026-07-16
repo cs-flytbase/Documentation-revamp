@@ -1,0 +1,54 @@
+name: Direct Push Alert
+
+on:
+  repository_dispatch:
+    types: [direct-push-alert]
+
+jobs:
+  notify-slack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post alert to Slack
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          REPO: ${{ github.event.client_payload.repo }}
+          PUSHER: ${{ github.event.client_payload.pusher }}
+          COMMIT_MSG: ${{ github.event.client_payload.commit_message }}
+          COMMIT_URL: ${{ github.event.client_payload.commit_url }}
+        run: |
+          python3 -c "
+          import os, json, urllib.request
+
+          channel = 'C0BGB8F56JX'  # doc-automation channel
+          token = os.environ['SLACK_BOT_TOKEN']
+          repo = os.environ.get('REPO', 'unknown')
+          pusher = os.environ.get('PUSHER', 'unknown')
+          commit_msg = os.environ.get('COMMIT_MSG', '')[:100]
+          commit_url = os.environ.get('COMMIT_URL', '')
+
+          message = (
+              ':rotating_light: *Direct push detected on main*\n\n'
+              f'*Repo:* {repo}\n'
+              f'*Pushed by:* {pusher}\n'
+              f'*Commit:* {commit_msg}\n'
+              f'*Link:* {commit_url}\n\n'
+              'All changes should go through Pull Requests. '
+              'Please use Mercury or create a PR instead of pushing directly.'
+          )
+
+          payload = json.dumps({
+              'channel': channel,
+              'text': message,
+          }).encode()
+
+          req = urllib.request.Request(
+              'https://slack.com/api/chat.postMessage',
+              data=payload,
+              headers={
+                  'Authorization': f'Bearer {token}',
+                  'Content-Type': 'application/json',
+              },
+          )
+          urllib.request.urlopen(req)
+          print('Alert posted to Slack')
+          "
