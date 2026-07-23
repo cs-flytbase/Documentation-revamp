@@ -16,3 +16,5 @@ Appended to by the memory updater when reviewers correct voice/tone issues.
 - [2026-07-15] [voice] The Access section must include detailed information — not just a one-liner. Include how to enable, who to contact, and any prerequisites.
 
 - [2026-07-15] [voice] Adjust the language to be more professional in the document below the Flex Factory integration caption.
+
+- [2026-07-23] [voice] Mention that the breakdown of VVMs is now app-wise, not source-wise, in future release notes.
