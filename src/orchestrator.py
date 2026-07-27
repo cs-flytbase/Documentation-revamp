@@ -206,7 +206,7 @@ def fetch_exemplar(research_result: dict) -> str:
         return ""
 
 
-def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "") -> dict:
+def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None) -> dict:
     """Run the full documentation generation pipeline."""
     print("=" * 60)
     print("FlytBase Documentation Pipeline")
@@ -285,51 +285,144 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     else:
         print("  No suitable exemplar found")
 
-    # Step 4: Drafting — split into two calls
-    print("\n[Step 4] Running Drafting agent (two separate calls)...")
-    print(f"  Passing: full source doc ({len(pm_doc)} chars), {len(vision_result)} vision descriptions,")
-    print(f"           {len(bundle['asset_filenames'])} asset filenames, YouTube: {'Yes' if bundle['youtube_link'] else 'No'}, Transcript: {'Yes' if bundle['transcript'] else 'No'}")
-
+    # Step 4: Drafting
     release_month = datetime.now().strftime("%B-%Y").lower()
 
-    drafting_agent = DraftingAgent()
-    draft_result = drafting_agent.draft(
-        pm_doc=pm_doc,
-        research_output=research_result,
-        vision_output=vision_result,
-        asset_filenames=bundle["asset_filenames"],
-        youtube_link=bundle["youtube_link"],
-        release_month=release_month,
-        transcript=bundle["transcript"],
-        exemplar=exemplar,
-        mode=mode,
-    )
+    if subsections:
+        # ── Subsections mode: draft parent overview + one release note per child ──
+        print(f"\n[Step 4] Running Drafting agent (SUBSECTIONS mode: {len(subsections['children'])} children)...")
+        print(f"  Parent: {subsections['parent_title']}")
+        for child in subsections["children"]:
+            print(f"    └─ {child['title']} ({child['slug']})")
 
-    if "error" in draft_result:
-        print(f"  Drafting agent FAILED: {draft_result['error']}")
-        raw_path = PROJECT_ROOT / "output" / "draft_raw_response.txt"
-        raw_path.parent.mkdir(parents=True, exist_ok=True)
-        raw_path.write_text(draft_result.get("raw_response", ""))
-        print(f"  Raw response saved to {raw_path}")
-        return {"status": "failed", "errors": [draft_result["error"]], "raw": draft_result}
+        drafting_agent = DraftingAgent()
+        child_results = []
 
-    # Show validation warnings
-    validation_warnings = draft_result.pop("_validation_warnings", [])
-    if validation_warnings:
-        print(f"\n  VALIDATION WARNINGS:")
-        for w in validation_warnings:
-            print(f"    ⚠ {w}")
+        for i, child in enumerate(subsections["children"]):
+            print(f"\n  [Drafting] Child {i+1}/{len(subsections['children'])}: {child['title']}...")
+            child_draft = drafting_agent.draft(
+                pm_doc=pm_doc,
+                research_output=research_result,
+                vision_output=vision_result,
+                asset_filenames=bundle["asset_filenames"],
+                youtube_link=bundle["youtube_link"],
+                release_month=release_month,
+                transcript=bundle["transcript"],
+                exemplar=exemplar,
+                mode=mode,
+                subsection_focus=child,
+            )
+            if "error" in child_draft:
+                print(f"    Child draft FAILED: {child_draft['error']}")
+                return {"status": "failed", "errors": [f"Subsection '{child['title']}' failed: {child_draft['error']}"]}
 
-    print("  Drafting agent done.")
-    rc = draft_result.get("release_note", {}).get("content", "")
-    dc = draft_result.get("doc_page", {}).get("content", "")
-    print(f"    Release note: {draft_result.get('release_note', {}).get('filename', 'N/A')} ({len(rc)} chars)")
-    print(f"    Doc page: {draft_result.get('doc_page', {}).get('filename', 'N/A')} ({len(dc)} chars)")
-    print(f"    Impacted page edits: {len(draft_result.get('impacted_page_edits', []))}")
+            child_results.append({
+                "slug": child["slug"],
+                "title": child["title"],
+                "draft": child_draft,
+            })
+            rc = child_draft.get("release_note", {}).get("content", "")
+            print(f"    Done: {child['slug']}.md ({len(rc)} chars)")
+
+        # Build parent overview page
+        print(f"\n  [Drafting] Generating parent overview: {subsections['parent_title']}...")
+        child_links = "\n".join(
+            f"* [{c['title']}]({c['slug']}.md)" for c in subsections["children"]
+        )
+        parent_content = (
+            f"---\ndescription: >-\n  {subsections['parent_summary'][:140]}\n---\n\n"
+            f"# {subsections['parent_title']}\n\n"
+            f"{subsections['parent_summary']}\n\n"
+            f"## In This Section\n\n{child_links}\n"
+        )
+
+        # Package as subsections draft result for the publisher
+        draft_result = {
+            "release_note": {},
+            "doc_page": {},
+            "impacted_page_edits": [],
+            "_subsections": {
+                "parent_title": subsections["parent_title"],
+                "parent_content": parent_content,
+                "parent_slug": Path(bundle_path).name,
+                "children": child_results,
+            },
+        }
+
+        # Collect impacted page edits from all children
+        for cr in child_results:
+            draft_result["impacted_page_edits"].extend(
+                cr["draft"].get("impacted_page_edits", [])
+            )
+
+        validation_warnings = []
+        for cr in child_results:
+            ws = cr["draft"].pop("_validation_warnings", [])
+            validation_warnings.extend(ws)
+
+        print(f"  Subsection drafting complete. {len(child_results)} children + 1 parent.")
+        print(f"    Impacted page edits: {len(draft_result['impacted_page_edits'])}")
+
+    else:
+        # ── Standard single-page mode ──
+        print("\n[Step 4] Running Drafting agent (two separate calls)...")
+        print(f"  Passing: full source doc ({len(pm_doc)} chars), {len(vision_result)} vision descriptions,")
+        print(f"           {len(bundle['asset_filenames'])} asset filenames, YouTube: {'Yes' if bundle['youtube_link'] else 'No'}, Transcript: {'Yes' if bundle['transcript'] else 'No'}")
+
+        drafting_agent = DraftingAgent()
+        draft_result = drafting_agent.draft(
+            pm_doc=pm_doc,
+            research_output=research_result,
+            vision_output=vision_result,
+            asset_filenames=bundle["asset_filenames"],
+            youtube_link=bundle["youtube_link"],
+            release_month=release_month,
+            transcript=bundle["transcript"],
+            exemplar=exemplar,
+            mode=mode,
+        )
+
+        if "error" in draft_result:
+            print(f"  Drafting agent FAILED: {draft_result['error']}")
+            raw_path = PROJECT_ROOT / "output" / "draft_raw_response.txt"
+            raw_path.parent.mkdir(parents=True, exist_ok=True)
+            raw_path.write_text(draft_result.get("raw_response", ""))
+            print(f"  Raw response saved to {raw_path}")
+            return {"status": "failed", "errors": [draft_result["error"]], "raw": draft_result}
+
+        validation_warnings = draft_result.pop("_validation_warnings", [])
+        if validation_warnings:
+            print(f"\n  VALIDATION WARNINGS:")
+            for w in validation_warnings:
+                print(f"    ⚠ {w}")
+
+        print("  Drafting agent done.")
+        rc = draft_result.get("release_note", {}).get("content", "")
+        dc = draft_result.get("doc_page", {}).get("content", "")
+        print(f"    Release note: {draft_result.get('release_note', {}).get('filename', 'N/A')} ({len(rc)} chars)")
+        print(f"    Doc page: {draft_result.get('doc_page', {}).get('filename', 'N/A')} ({len(dc)} chars)")
+        print(f"    Impacted page edits: {len(draft_result.get('impacted_page_edits', []))}")
 
     # Step 5: Verification — fact-check against sources
     print("\n[Step 5] Running Verification agent...")
     verifier = VerificationAgent()
+
+    if subsections and "_subsections" in draft_result:
+        # Combine all child content for verification
+        all_release_content = "\n\n---\n\n".join(
+            cr["draft"].get("release_note", {}).get("content", "")
+            for cr in draft_result["_subsections"]["children"]
+        )
+        all_doc_content = "\n\n---\n\n".join(
+            cr["draft"].get("doc_page", {}).get("content", "")
+            for cr in draft_result["_subsections"]["children"]
+        )
+        rc = all_release_content
+        dc = all_doc_content
+    else:
+        rc = draft_result.get("release_note", {}).get("content", "")
+        dc = draft_result.get("doc_page", {}).get("content", "")
+
     verification_result = verifier.verify(
         release_note_content=rc,
         doc_page_content=dc,
@@ -441,6 +534,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                 slack_channel=slack_channel,
                 slack_thread_ts=slack_thread_ts,
                 mode=mode,
+                subsections=draft_result.get("_subsections"),
             )
             if pr_results.get("releases_pr"):
                 print(f"    Releases PR: {pr_results['releases_pr']}")
@@ -480,7 +574,12 @@ if __name__ == "__main__":
                         default="both", help="Output mode")
     parser.add_argument("--requester-name", default="", help="Name of person who requested this run")
     parser.add_argument("--requester-username", default="", help="Username of requester")
+    parser.add_argument("--subsections-json", default="", help="JSON string with subsections structure")
     args = parser.parse_args()
+    sub = None
+    if args.subsections_json:
+        sub = json.loads(args.subsections_json)
     run_pipeline(args.bundle, mode=args.mode,
                  requester_name=args.requester_name,
-                 requester_username=args.requester_username)
+                 requester_username=args.requester_username,
+                 subsections=sub)

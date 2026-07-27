@@ -423,6 +423,85 @@ class GitHubPublisher:
         })
         return data["html_url"]
 
+    def _update_summary_nested(self, repo: str, branch: str, section_title: str,
+                               parent_path: str, parent_title: str,
+                               children: list[dict]) -> None:
+        """Add a parent page with nested child entries to SUMMARY.md.
+
+        Creates entries like:
+          ## July 2026
+          * [Parent Title](july-2026/parent-slug/README.md)
+            * [Child Title](july-2026/parent-slug/child-slug.md)
+        """
+        summary_content, summary_sha = self._get_file(repo, "SUMMARY.md", branch)
+        if summary_content is None:
+            return
+
+        # Check if parent entry already exists
+        if parent_path in summary_content:
+            return
+
+        parent_entry = f"* [{parent_title}]({parent_path})"
+        child_entries = [
+            f"  * [{c['title']}]({c['path']})" for c in children
+        ]
+        all_entries = [parent_entry] + child_entries
+
+        lines = summary_content.splitlines()
+        insert_idx = None
+
+        in_section = False
+        for i, line in enumerate(lines):
+            if line.strip().startswith("## ") and section_title.lower() in line.lower():
+                in_section = True
+                continue
+            if in_section:
+                if line.strip().startswith("## "):
+                    insert_idx = i
+                    break
+                if line.strip().startswith("* ["):
+                    insert_idx = i + 1
+
+        if insert_idx is None:
+            if in_section:
+                insert_idx = len(lines)
+            else:
+                first_section_idx = None
+                for i, line in enumerate(lines):
+                    if line.strip().startswith("## "):
+                        first_section_idx = i
+                        break
+
+                if first_section_idx is not None:
+                    for entry in reversed(all_entries):
+                        lines.insert(first_section_idx, entry)
+                    lines.insert(first_section_idx, "")
+                    lines.insert(first_section_idx, f"## {section_title}")
+                    lines.insert(first_section_idx, "")
+                else:
+                    lines.append("")
+                    lines.append(f"## {section_title}")
+                    lines.append("")
+                    lines.extend(all_entries)
+
+                updated = "\n".join(lines) + "\n"
+                self._write_file(
+                    repo, "SUMMARY.md", updated, branch,
+                    f"docs: add {parent_title} (subsections) to SUMMARY.md",
+                    existing_sha=summary_sha,
+                )
+                return
+
+        for entry in reversed(all_entries):
+            lines.insert(insert_idx, entry)
+
+        updated = "\n".join(lines) + "\n"
+        self._write_file(
+            repo, "SUMMARY.md", updated, branch,
+            f"docs: add {parent_title} (subsections) to SUMMARY.md",
+            existing_sha=summary_sha,
+        )
+
     def publish(
         self,
         draft_result: dict,
@@ -435,6 +514,7 @@ class GitHubPublisher:
         requester_username: str = "",
         slack_channel: str = "",
         slack_thread_ts: str = "",
+        subsections: dict = None,
     ) -> dict:
         """Full publish flow: create branches, write files, patch impacted pages, open PRs.
 
@@ -456,13 +536,71 @@ class GitHubPublisher:
                 releases_sha = self._get_branch_sha(RELEASES_REPO, BASE_BRANCH)
                 self._create_branch(RELEASES_REPO, branch, releases_sha)
 
-                if release_note:
+                if subsections:
+                    # ── Subsections mode: folder with README.md + child files ──
+                    parent_slug = subsections["parent_slug"]
+                    parent_title = subsections["parent_title"]
+                    folder_path = f"{release_month}/{parent_slug}"
+
+                    # Write parent overview as README.md
+                    self._write_file(
+                        RELEASES_REPO, f"{folder_path}/README.md",
+                        subsections["parent_content"], branch,
+                        f"docs: add {parent_slug} parent overview",
+                    )
+
+                    # Write each child
+                    summary_children = []
+                    for child_result in subsections["children"]:
+                        child_slug = child_result["slug"]
+                        child_draft = child_result["draft"]
+                        child_rn = child_draft.get("release_note", {})
+                        if not child_rn:
+                            continue
+                        child_content = child_rn.get("frontmatter", "") + "\n\n" + child_rn.get("content", "")
+                        child_path = f"{folder_path}/{child_slug}.md"
+                        self._write_file(
+                            RELEASES_REPO, child_path, child_content, branch,
+                            f"docs: add {child_slug} release note",
+                        )
+                        child_title = self._extract_title(child_rn.get("content", ""), child_slug.replace("-", " ").title())
+                        summary_children.append({"title": child_title, "path": child_path})
+
+                    # Update SUMMARY.md with nested structure
+                    section_title = release_month.replace("-", " ").upper()
+                    self._update_summary_nested(
+                        RELEASES_REPO, branch, section_title,
+                        f"{folder_path}/README.md", parent_title,
+                        summary_children,
+                    )
+
+                    # Upload assets to shared folder
+                    for asset_path in bundle_asset_paths:
+                        cached = self._asset_cache.get(asset_path)
+                        err = self._upload_asset(RELEASES_REPO, asset_path, f"{folder_path}/assets", branch, feature_slug, precompressed=cached)
+                        if err:
+                            results["errors"].append(err)
+
+                    # Build PR body for subsections
+                    child_list = "\n".join(f"- `{c['path']}` — {c['title']}" for c in summary_children)
+                    pr_body = self._build_pr_body_subsections(
+                        parent_title, f"{folder_path}/README.md", summary_children,
+                        impacted_edits, "releases",
+                        requester_name, requester_username, slack_channel, slack_thread_ts,
+                    )
+                    results["releases_pr"] = self._create_pr(
+                        RELEASES_REPO, branch,
+                        f"✍️ New Release Notes: {parent_title} ({len(summary_children)} subsections)",
+                        pr_body,
+                    )
+
+                elif release_note:
+                    # ── Standard single-file mode ──
                     filename = Path(release_note.get("filename", "release.md")).name
                     full_content = release_note.get("frontmatter", "") + "\n\n" + release_note.get("content", "")
                     file_path = f"{release_month}/{filename}"
                     self._write_file(RELEASES_REPO, file_path, full_content, branch, f"docs: add {feature_slug} release note")
 
-                    # Use the actual H1 title from the content, not the filename slug
                     slug_title = feature_slug.replace("-", " ").title()
                     feature_title = self._extract_title(release_note.get("content", ""), slug_title)
                     section_title = release_month.replace("-", " ").upper()
@@ -489,13 +627,13 @@ class GitHubPublisher:
                     except Exception as e:
                         results["errors"].append(f"Failed to patch {url}: {e}")
 
-                # Protect README.md — ensure landing page stays clean
                 self._protect_readme(RELEASES_REPO, branch)
 
-                slug_title = feature_slug.replace("-", " ").title()
-                rn_title = self._extract_title(release_note.get("content", ""), slug_title)
-                pr_body = self._build_pr_body(rn_title, release_note, impacted_edits, "releases", requester_name, requester_username, slack_channel, slack_thread_ts)
-                results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {rn_title}", pr_body)
+                if not subsections:
+                    slug_title = feature_slug.replace("-", " ").title()
+                    rn_title = self._extract_title(release_note.get("content", ""), slug_title)
+                    pr_body = self._build_pr_body(rn_title, release_note, impacted_edits, "releases", requester_name, requester_username, slack_channel, slack_thread_ts)
+                    results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {rn_title}", pr_body)
             except Exception as e:
                 results["errors"].append(f"Releases repo failed: {e}")
 
@@ -505,7 +643,64 @@ class GitHubPublisher:
                 docs_sha = self._get_branch_sha(DOCS_REPO, BASE_BRANCH)
                 self._create_branch(DOCS_REPO, branch, docs_sha)
 
-                if doc_page:
+                if subsections:
+                    # ── Subsections mode for docs ──
+                    parent_slug = subsections["parent_slug"]
+                    parent_title = subsections["parent_title"]
+                    # Use the first child's target_path for folder location
+                    first_child_dp = subsections["children"][0]["draft"].get("doc_page", {})
+                    target_path = first_child_dp.get("target_path", "").strip("/")
+                    folder_path = f"{target_path}/{parent_slug}" if target_path else parent_slug
+
+                    self._write_file(
+                        DOCS_REPO, f"{folder_path}/README.md",
+                        subsections["parent_content"], branch,
+                        f"docs: add {parent_slug} parent overview",
+                    )
+
+                    summary_children = []
+                    for child_result in subsections["children"]:
+                        child_slug = child_result["slug"]
+                        child_draft = child_result["draft"]
+                        child_dp = child_draft.get("doc_page", {})
+                        if not child_dp:
+                            continue
+                        child_content = child_dp.get("frontmatter", "") + "\n\n" + child_dp.get("content", "")
+                        child_path = f"{folder_path}/{child_slug}.md"
+                        self._write_file(
+                            DOCS_REPO, child_path, child_content, branch,
+                            f"docs: add {child_slug} doc page",
+                        )
+                        child_title = self._extract_title(child_dp.get("content", ""), child_slug.replace("-", " ").title())
+                        summary_children.append({"title": child_title, "path": child_path})
+
+                    if target_path:
+                        parent_section = target_path.replace("-", " ").replace("/", " > ").title().split(" > ")[-1]
+                        self._update_summary_nested(
+                            DOCS_REPO, branch, parent_section,
+                            f"{folder_path}/README.md", parent_title,
+                            summary_children,
+                        )
+
+                    for asset_path in bundle_asset_paths:
+                        cached = self._asset_cache.get(asset_path)
+                        err = self._upload_asset(DOCS_REPO, asset_path, f"{folder_path}/assets", branch, feature_slug, precompressed=cached)
+                        if err:
+                            results["errors"].append(err)
+
+                    pr_body = self._build_pr_body_subsections(
+                        parent_title, f"{folder_path}/README.md", summary_children,
+                        impacted_edits, "docs",
+                        requester_name, requester_username, slack_channel, slack_thread_ts,
+                    )
+                    results["docs_pr"] = self._create_pr(
+                        DOCS_REPO, branch,
+                        f"📄 New Doc Pages: {parent_title} ({len(summary_children)} subsections)",
+                        pr_body,
+                    )
+
+                elif doc_page:
+                    # ── Standard single-file mode ──
                     filename = Path(doc_page.get("filename", "doc.md")).name
                     full_content = doc_page.get("frontmatter", "") + "\n\n" + doc_page.get("content", "")
                     target_path = doc_page.get("target_path", "").strip("/")
@@ -539,17 +734,101 @@ class GitHubPublisher:
                     except Exception as e:
                         results["errors"].append(f"Failed to patch {url}: {e}")
 
-                # Protect README.md — ensure landing page stays clean
                 self._protect_readme(DOCS_REPO, branch)
 
-                slug_title = feature_slug.replace("-", " ").title()
-                dp_title = self._extract_title(doc_page.get("content", ""), slug_title)
-                pr_body = self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username, slack_channel, slack_thread_ts)
-                results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {dp_title}", pr_body)
+                if not subsections:
+                    slug_title = feature_slug.replace("-", " ").title()
+                    dp_title = self._extract_title(doc_page.get("content", ""), slug_title)
+                    pr_body = self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username, slack_channel, slack_thread_ts)
+                    results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {dp_title}", pr_body)
             except Exception as e:
                 results["errors"].append(f"Docs repo failed: {e}")
 
         return results
+
+    def _build_pr_body_subsections(self, parent_title: str, parent_path: str,
+                                    children: list[dict], impacted_edits: list, repo_type: str,
+                                    requester_name: str = "", requester_username: str = "",
+                                    slack_channel: str = "", slack_thread_ts: str = "") -> str:
+        is_releases = repo_type == "releases"
+        page_type = "Release Notes" if is_releases else "Doc Pages"
+
+        relevant_edits = [
+            e for e in impacted_edits
+            if (is_releases and "releases.flytbase.com" in e.get("source_url", ""))
+            or (not is_releases and "docs.flytbase.com" in e.get("source_url", ""))
+        ]
+
+        lines = [
+            f"## {parent_title}",
+            "",
+            f"> This PR was automatically generated by the FlytBase Documentation Pipeline (subsections mode).",
+            "",
+            "---",
+            "",
+            f"### 📁 New {page_type} (Grouped)",
+            f"**Parent:** `{parent_path}`",
+            "",
+            f"**Subsections ({len(children)}):**",
+        ]
+        for c in children:
+            lines.append(f"- `{c['path']}` — {c['title']}")
+
+        lines += [
+            "",
+            f"This PR creates a grouped {'release note' if is_releases else 'documentation'} page with "
+            f"{len(children)} subsections under **{parent_title}**.",
+            "",
+        ]
+
+        if relevant_edits:
+            lines += [
+                "---",
+                "",
+                f"### ✏️ Existing Pages Updated ({len(relevant_edits)})",
+                "",
+            ]
+            for e in relevant_edits:
+                url = e.get("source_url", "")
+                description = e.get("edit_description", "")
+                lines += [f"**{url}**", f"_{description}_", ""]
+
+        lines += [
+            "---",
+            "",
+            "### ✅ Review Checklist",
+            "",
+            f"- [ ] Parent overview page links to all subsections",
+            f"- [ ] Each subsection covers its scoped content",
+            "- [ ] All images render correctly (check the Preview tab)",
+            "- [ ] Tone and terminology match existing pages",
+        ]
+
+        if relevant_edits:
+            lines += [
+                "- [ ] Patched sections read naturally in their existing pages",
+                "- [ ] Cross-reference links are correct",
+            ]
+
+        lines += [
+            "",
+            "**If anything looks wrong**, leave a comment explaining the issue "
+            "— the pipeline will learn from it for next time.",
+            "",
+            "---",
+            "",
+        ]
+
+        if requester_name:
+            lines.append(f"**Requested by:** {requester_name} (@{requester_username})")
+        from datetime import datetime
+        lines.append(f"**Generated at:** {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC")
+        lines.append("**Via:** FlytBase Documentation Pipeline")
+        if slack_channel and slack_thread_ts:
+            thread_id = slack_thread_ts.replace(".", "")
+            lines.append(f"**Slack thread:** https://flytbase.slack.com/archives/{slack_channel}/p{thread_id}")
+
+        return "\n".join(lines)
 
     def _build_pr_body(self, feature_title: str, page: dict, impacted_edits: list, repo_type: str,
                        requester_name: str = "", requester_username: str = "",

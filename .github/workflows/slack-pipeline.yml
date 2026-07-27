@@ -49,6 +49,18 @@ jobs:
           echo "slack_channel=${{ github.event.client_payload.slack_channel }}" >> $GITHUB_OUTPUT
           echo "slack_thread_ts=${{ github.event.client_payload.slack_thread_ts }}" >> $GITHUB_OUTPUT
 
+      - name: Extract subsections
+        id: subsections
+        run: |
+          # Subsections is passed as a JSON string — write to file for Python to read
+          SUBSECTIONS_JSON='${{ github.event.client_payload.subsections }}'
+          if [ -n "$SUBSECTIONS_JSON" ] && [ "$SUBSECTIONS_JSON" != "null" ]; then
+            echo "$SUBSECTIONS_JSON" > /tmp/subsections.json
+            echo "has_subsections=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_subsections=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Fetch content from Worker KV and run pipeline
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
@@ -143,13 +155,24 @@ jobs:
           pm_doc_path = Path(bundle_dir) / 'pm_doc.md'
           pm_doc_path.write_text(pm_doc)
 
+          # Step 1.5: Load subsections if present
+          subsections = None
+          has_subsections = '${{ steps.subsections.outputs.has_subsections }}'
+          if has_subsections == 'true':
+              import os
+              sub_path = '/tmp/subsections.json'
+              if os.path.exists(sub_path):
+                  with open(sub_path) as sf:
+                      subsections = json.load(sf)
+                  print(f'[Slack Pipeline] Subsections: {len(subsections.get(\"children\", []))} children under \"{subsections.get(\"parent_title\", \"\")}\"')
+
           # Step 2: Run the existing pipeline
           print('[Slack Pipeline] Running pipeline...')
           requester_name = '${{ steps.payload.outputs.requester_name }}'
           requester_username = '${{ steps.payload.outputs.requester_username }}'
           slack_channel = '${{ steps.payload.outputs.slack_channel }}'
           slack_thread_ts = '${{ steps.payload.outputs.slack_thread_ts }}'
-          result = run_pipeline(bundle_dir, mode=mode, requester_name=requester_name, requester_username=requester_username, slack_channel=slack_channel, slack_thread_ts=slack_thread_ts)
+          result = run_pipeline(bundle_dir, mode=mode, requester_name=requester_name, requester_username=requester_username, slack_channel=slack_channel, slack_thread_ts=slack_thread_ts, subsections=subsections)
           print(f'[Slack Pipeline] Pipeline result: {result.get(\"status\", \"unknown\")}')
 
           # Save PR URLs and file paths for the notification step

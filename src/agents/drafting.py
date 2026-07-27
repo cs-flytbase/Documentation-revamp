@@ -337,11 +337,30 @@ Release month: {release_month or "current month"}"""
         transcript: str = "",
         exemplar: str = "",
         mode: str = "both",
+        subsection_focus: dict = None,
     ) -> dict:
         context = self._build_context(
             pm_doc, research_output, vision_output, asset_filenames,
             youtube_link, release_month, transcript, exemplar,
         )
+
+        # When drafting a subsection, add focus instructions
+        if subsection_focus:
+            context += f"""
+
+--- SUBSECTION FOCUS ---
+You are drafting ONE SUBSECTION of a larger grouped release. Focus ONLY on the content described below.
+Title: {subsection_focus['title']}
+Scope: {subsection_focus['summary']}
+Slug: {subsection_focus['slug']}
+
+IMPORTANT:
+- Use the title above as your H1 heading.
+- Use "{subsection_focus['slug']}.md" as the filename.
+- Only cover content relevant to this subsection's scope.
+- Do NOT cover content that belongs to other subsections.
+- Still use ALL provided assets that are relevant to this subsection's scope. Skip assets that clearly belong to other subsections.
+--- END SUBSECTION FOCUS ---"""
 
         release_result = {}
         doc_result = {}
