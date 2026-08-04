@@ -201,6 +201,63 @@ Return ONLY valid JSON. No markdown wrapping.
 """
 
 
+def _extract_json(text: str) -> dict:
+    """Robustly extract a JSON object from LLM output.
+
+    Handles: markdown fences, leading/trailing text, nested braces.
+    """
+    text = text.strip()
+
+    # Strategy 1: Try direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 2: Strip markdown code fences (```json ... ``` or ``` ... ```)
+    fence_match = re.search(r'```(?:json)?\s*\n(.*?)```', text, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # Strategy 3: Find the outermost { ... } in the text
+    first_brace = text.find('{')
+    if first_brace != -1:
+        depth = 0
+        last_brace = -1
+        in_string = False
+        escape_next = False
+        for i in range(first_brace, len(text)):
+            c = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if c == '\\' and in_string:
+                escape_next = True
+                continue
+            if c == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    last_brace = i
+                    break
+        if last_brace != -1:
+            try:
+                return json.loads(text[first_brace:last_brace + 1])
+            except json.JSONDecodeError:
+                pass
+
+    raise json.JSONDecodeError("No valid JSON found in response", text, 0)
+
+
 class DraftingAgent(BaseAgent):
     def __init__(self):
         super().__init__(
@@ -365,10 +422,7 @@ CHECKLIST before you respond:
             release_response = self.run(release_message)
 
             try:
-                text = release_response.strip()
-                if text.startswith("```"):
-                    text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-                release_result = json.loads(text)
+                release_result = _extract_json(release_response)
             except json.JSONDecodeError:
                 return {"error": "Failed to parse release note output", "raw_response": release_response}
         else:
@@ -396,10 +450,7 @@ CHECKLIST before you respond:
             doc_response = self.run(doc_message)
 
             try:
-                text = doc_response.strip()
-                if text.startswith("```"):
-                    text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-                doc_result = json.loads(text)
+                doc_result = _extract_json(doc_response)
             except json.JSONDecodeError:
                 return {"error": "Failed to parse doc page output", "raw_response": doc_response}
         else:
@@ -444,12 +495,9 @@ Fix ALL of these issues. Here is the context again:
 Return the corrected release note as JSON."""
             response = self.run(retry_msg)
             try:
-                text = response.strip()
-                if text.startswith("```"):
-                    text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-                current_result["release_note"] = json.loads(text)
+                current_result["release_note"] = _extract_json(response)
             except json.JSONDecodeError:
-                pass  # Keep original if retry fails
+                pass
 
         if doc_issues:
             self.system_prompt = DOC_PAGE_PROMPT
@@ -462,10 +510,7 @@ Fix ALL of these issues. Here is the context again:
 Return the corrected doc page as JSON (include impacted_page_edits)."""
             response = self.run(retry_msg)
             try:
-                text = response.strip()
-                if text.startswith("```"):
-                    text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-                result = json.loads(text)
+                result = _extract_json(response)
                 current_result["doc_page"] = {k: v for k, v in result.items() if k != "impacted_page_edits"}
                 if "impacted_page_edits" in result:
                     current_result["impacted_page_edits"] = result["impacted_page_edits"]
@@ -519,9 +564,6 @@ Return the corrected doc page as JSON (include impacted_page_edits)."""
         response = self.run_with_history(self.conversation_history)
         self.conversation_history.append({"role": "assistant", "content": response})
         try:
-            text = response.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-            return json.loads(text)
+            return _extract_json(response)
         except json.JSONDecodeError:
             return {"error": "Failed to parse revised output", "raw_response": response}
