@@ -1,0 +1,223 @@
+name: Bulk Replace
+
+on:
+  repository_dispatch:
+    types: [bulk-replace]
+
+env:
+  GH_TOKEN: ${{ secrets.FLYTBASE_GITHUB_TOKEN }}
+
+jobs:
+  bulk-replace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Bulk replace across repos
+        uses: actions/github-script@v7
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        with:
+          github-token: ${{ secrets.FLYTBASE_GITHUB_TOKEN }}
+          script: |
+            const {
+              old_term, new_term, repos, case_sensitive,
+              slack_channel, slack_thread_ts,
+              requester_name, requester_username
+            } = context.payload.client_payload;
+
+            const flags = case_sensitive !== false ? 'g' : 'gi';
+            const regex = new RegExp(old_term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+            const oldSlug = old_term.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            const newSlug = new_term.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            const allResults = [];
+
+            for (const repo of repos) {
+              const [owner, name] = repo.split('/');
+              console.log(`Processing ${repo}...`);
+
+              // 1. Get full tree
+              const { data: tree } = await github.rest.git.getTree({
+                owner, repo: name, tree_sha: 'main', recursive: '1'
+              });
+              const mdFiles = tree.tree
+                .filter(t => t.type === 'blob' && t.path.endsWith('.md'))
+                .filter(t => {
+                  const fn = t.path.split('/').pop().toLowerCase();
+                  if (fn === 'readme.md' && !t.path.includes('/')) return false;
+                  return true;
+                });
+
+              // 2. Read all md file contents
+              const fileMap = {};
+              for (const f of mdFiles) {
+                try {
+                  const { data } = await github.rest.repos.getContent({
+                    owner, repo: name, path: f.path, ref: 'main'
+                  });
+                  if (data.content) {
+                    fileMap[f.path] = Buffer.from(data.content, 'base64').toString('utf8');
+                  }
+                } catch (e) {
+                  console.error(`Skip read ${f.path}: ${e.message}`);
+                }
+              }
+
+              // 3. Find files containing the term and apply replacement
+              const treeEntries = [];
+              const changed = [];
+
+              for (const [path, content] of Object.entries(fileMap)) {
+                const fn = path.split('/').pop().toLowerCase();
+                if (fn === 'summary.md') {
+                  // Handle SUMMARY.md separately but still replace in it
+                  const updated = content.replace(regex, new_term);
+                  if (updated !== content) {
+                    const count = (content.match(regex) || []).length;
+                    treeEntries.push({ path, mode: '100644', type: 'blob', content: updated });
+                    changed.push({ path, count });
+                  }
+                  continue;
+                }
+                const updated = content.replace(regex, new_term);
+                if (updated !== content) {
+                  const count = (content.match(regex) || []).length;
+                  treeEntries.push({ path, mode: '100644', type: 'blob', content: updated });
+                  changed.push({ path, count });
+                }
+              }
+
+              // 4. Handle file renames (files with old slug in filename)
+              const renamed = [];
+              if (oldSlug !== newSlug) {
+                for (const f of mdFiles) {
+                  const fileName = f.path.split('/').pop().replace(/\.md$/, '');
+                  if (!fileName.includes(oldSlug)) continue;
+
+                  const oldFileName = f.path.split('/').pop();
+                  const newFileName = oldFileName.replace(
+                    new RegExp(oldSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), newSlug
+                  );
+                  if (newFileName === oldFileName) continue;
+
+                  const dir = f.path.includes('/') ? f.path.substring(0, f.path.lastIndexOf('/')) : '';
+                  const newPath = dir ? `${dir}/${newFileName}` : newFileName;
+
+                  // Get content (may already be modified by replacement above)
+                  const existingEntry = treeEntries.find(e => e.path === f.path);
+                  const fileContent = existingEntry ? existingEntry.content : (fileMap[f.path] || '');
+
+                  // Remove old path entry if it was added for content replacement
+                  const existingIdx = treeEntries.findIndex(e => e.path === f.path);
+                  if (existingIdx >= 0) treeEntries.splice(existingIdx, 1);
+
+                  // Add new path with content, delete old path
+                  treeEntries.push({ path: newPath, mode: '100644', type: 'blob', content: fileContent });
+                  treeEntries.push({ path: f.path, mode: '100644', type: 'blob', sha: null });
+                  renamed.push({ from: f.path, to: newPath });
+
+                  // Update cross-references to old filename in all files
+                  for (const entry of treeEntries) {
+                    if (!entry.content || entry.path === newPath) continue;
+                    const refRegex = new RegExp(oldFileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                    const updatedContent = entry.content.replace(refRegex, newFileName);
+                    if (updatedContent !== entry.content) entry.content = updatedContent;
+                  }
+                  // Also check un-modified files for cross-references
+                  for (const [path, content] of Object.entries(fileMap)) {
+                    if (treeEntries.some(e => e.path === path)) continue;
+                    const refRegex = new RegExp(oldFileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                    if (refRegex.test(content)) {
+                      treeEntries.push({
+                        path, mode: '100644', type: 'blob',
+                        content: content.replace(refRegex, newFileName)
+                      });
+                    }
+                  }
+                }
+              }
+
+              if (treeEntries.length === 0) {
+                console.log(`No matches in ${repo}`);
+                allResults.push({ repo, files_changed: 0, renamed: 0 });
+                continue;
+              }
+
+              // 5. Create single commit with all changes via Git Data API
+              const { data: mainRef } = await github.rest.git.getRef({ owner, repo: name, ref: 'heads/main' });
+              const baseSha = mainRef.object.sha;
+
+              const { data: baseCommit } = await github.rest.git.getCommit({ owner, repo: name, commit_sha: baseSha });
+
+              const { data: newTree } = await github.rest.git.createTree({
+                owner, repo: name,
+                base_tree: baseCommit.tree.sha,
+                tree: treeEntries
+              });
+
+              const { data: newCommit } = await github.rest.git.createCommit({
+                owner, repo: name,
+                message: `docs: replace "${old_term}" with "${new_term}" across ${changed.length} files`,
+                tree: newTree.sha,
+                parents: [baseSha]
+              });
+
+              const branch = `mercury/bulk-replace-${Date.now()}`;
+              await github.rest.git.createRef({
+                owner, repo: name,
+                ref: `refs/heads/${branch}`,
+                sha: newCommit.sha
+              });
+
+              // 6. Create PR
+              const fileList = changed.map(f => `- \`${f.path}\` (${f.count} replacements)`).join('\n');
+              const renameList = renamed.map(r => `- \`${r.from}\` → \`${r.to}\``).join('\n');
+              let prBody = `## Bulk Replace\n\n**"${old_term}"** → **"${new_term}"**\n\n`;
+              if (changed.length > 0) prBody += `**Content updated (${changed.length} files):**\n${fileList}\n\n`;
+              if (renamed.length > 0) prBody += `**Files renamed (${renamed.length}):**\n${renameList}\n\n`;
+              prBody += `---\n`;
+              if (requester_name) prBody += `**Requested by:** ${requester_name} (@${requester_username})\n`;
+              prBody += `**Via:** Mercury (Bulk Replace)`;
+
+              const { data: pr } = await github.rest.pulls.create({
+                owner, repo: name,
+                title: `🔄 Bulk Replace: "${old_term}" → "${new_term}"`,
+                body: prBody,
+                head: branch,
+                base: 'main'
+              });
+
+              console.log(`PR created: ${pr.html_url}`);
+              allResults.push({
+                repo, files_changed: changed.length,
+                renamed: renamed.length, pr: pr.html_url
+              });
+            }
+
+            // 7. Post results to Slack
+            let slackMsg = `✅ Bulk replace complete: *"${old_term}"* → *"${new_term}"*\n`;
+            for (const r of allResults) {
+              if (r.files_changed > 0 || r.renamed > 0) {
+                const parts = [];
+                if (r.files_changed > 0) parts.push(`${r.files_changed} files updated`);
+                if (r.renamed > 0) parts.push(`${r.renamed} files renamed`);
+                slackMsg += `\n• ${r.repo}: ${parts.join(', ')} — <${r.pr}|View PR>`;
+              } else {
+                slackMsg += `\n• ${r.repo}: no matches found`;
+              }
+            }
+
+            const slackResp = await fetch('https://slack.com/api/chat.postMessage', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${process.env.SLACK_BOT_TOKEN}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                channel: slack_channel,
+                thread_ts: slack_thread_ts,
+                text: slackMsg
+              })
+            });
+            const slackResult = await slackResp.json();
+            if (!slackResult.ok) console.error('Slack post failed:', slackResult.error);
