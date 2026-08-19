@@ -20,3 +20,5 @@ Appended to by the memory updater when reviewers correct voice/tone issues.
 - [2026-07-23] [voice] Mention that the breakdown of VVMs is now app-wise, not source-wise, in future release notes.
 
 - [2026-08-19] [voice] Include feature intro videos on all pages to explain the problem solved and usage.
+
+- [2026-08-19] [voice] Text and images should accompany videos for comprehensive understanding.
