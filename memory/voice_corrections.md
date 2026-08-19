@@ -22,3 +22,5 @@ Appended to by the memory updater when reviewers correct voice/tone issues.
 - [2026-08-19] [voice] Include feature intro videos on all pages to explain the problem solved and usage.
 
 - [2026-08-19] [voice] Text and images should accompany videos for comprehensive understanding.
+- [2026-08-19] [voice] CRITICAL — Director review: release note language is too gimmicky. Rewrite in simplified technical English (ASD-STE100 style). Use short sentences, active voice, concrete terms. NEVER use storytelling hooks like "Imagine you are...", "In the fast-paced world of...", "game-changer", "headache", "a breeze", "here to change the game", "making life easier", "head-on". Lead problem sections with a direct statement of the limitation, not a narrative buildup.
+- [2026-08-19] [voice] NEVER claim FlytBase supports "multi-factor authentication (MFA)" — it does not. Remove any MFA references from release notes or docs.
