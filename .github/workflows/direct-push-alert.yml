@@ -8,7 +8,39 @@ jobs:
   notify-slack:
     runs-on: ubuntu-latest
     steps:
+      - name: Check if commit came from a PR
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.PIPELINE_TOKEN }}
+          REPO: ${{ github.event.client_payload.repo }}
+          COMMIT_URL: ${{ github.event.client_payload.commit_url }}
+        run: |
+          # Extract commit SHA from the commit URL
+          COMMIT_SHA=$(echo "$COMMIT_URL" | grep -oE '[0-9a-f]{40}')
+
+          if [ -z "$COMMIT_SHA" ]; then
+            echo "Could not extract commit SHA, proceeding with alert"
+            echo "from_pr=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Query GitHub API for PRs associated with this commit on the source repo
+          prs=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/$REPO/commits/$COMMIT_SHA/pulls" \
+            -H "Accept: application/vnd.github.v3+json")
+
+          merged=$(echo "$prs" | python3 -c "
+          import json, sys
+          try:
+              prs = json.load(sys.stdin)
+              print('true' if any(p.get('merged_at') for p in prs) else 'false')
+          except:
+              print('false')
+          ")
+          echo "from_pr=$merged" >> "$GITHUB_OUTPUT"
+
       - name: Post alert to Slack
+        if: steps.check.outputs.from_pr == 'false'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           REPO: ${{ github.event.client_payload.repo }}
@@ -19,7 +51,7 @@ jobs:
           python3 -c "
           import os, json, urllib.request
 
-          channel = 'C0BGB8F56JX'  # doc-automation channel
+          channel = 'C0BGB8F56JX'
           token = os.environ['SLACK_BOT_TOKEN']
           repo = os.environ.get('REPO', 'unknown')
           pusher = os.environ.get('PUSHER', 'unknown')
@@ -27,11 +59,18 @@ jobs:
           commit_url = os.environ.get('COMMIT_URL', '')
 
           message = (
-              ':rotating_light: *Direct push detected on main*\n\n'
-              f'*Repo:* {repo}\n'
-              f'*Pushed by:* {pusher}\n'
-              f'*Commit:* {commit_msg}\n'
-              f'*Link:* {commit_url}\n\n'
+              ':rotating_light: *Direct push detected on main*
+
+'
+              f'*Repo:* {repo}
+'
+              f'*Pushed by:* {pusher}
+'
+              f'*Commit:* {commit_msg}
+'
+              f'*Link:* {commit_url}
+
+'
               'All changes should go through Pull Requests. '
               'Please use Mercury or create a PR instead of pushing directly.'
           )
