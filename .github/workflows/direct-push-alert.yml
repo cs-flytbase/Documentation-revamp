@@ -15,7 +15,6 @@ jobs:
           REPO: ${{ github.event.client_payload.repo }}
           COMMIT_URL: ${{ github.event.client_payload.commit_url }}
         run: |
-          # Extract commit SHA from the commit URL
           COMMIT_SHA=$(echo "$COMMIT_URL" | grep -oE '[0-9a-f]{40}')
 
           if [ -z "$COMMIT_SHA" ]; then
@@ -24,7 +23,6 @@ jobs:
             exit 0
           fi
 
-          # Query GitHub API for PRs associated with this commit on the source repo
           prs=$(curl -s -H "Authorization: token $GH_TOKEN" \
             "https://api.github.com/repos/$REPO/commits/$COMMIT_SHA/pulls" \
             -H "Accept: application/vnd.github.v3+json")
@@ -34,7 +32,7 @@ jobs:
           try:
               prs = json.load(sys.stdin)
               print('true' if any(p.get('merged_at') for p in prs) else 'false')
-          except:
+          except Exception:
               print('false')
           ")
           echo "from_pr=$merged" >> "$GITHUB_OUTPUT"
@@ -51,6 +49,7 @@ jobs:
           python3 -c "
           import os, json, urllib.request
 
+          NL = chr(10)
           channel = 'C0BGB8F56JX'
           token = os.environ['SLACK_BOT_TOKEN']
           repo = os.environ.get('REPO', 'unknown')
@@ -58,33 +57,26 @@ jobs:
           commit_msg = os.environ.get('COMMIT_MSG', '')[:100]
           commit_url = os.environ.get('COMMIT_URL', '')
 
-          message = (
-              ':rotating_light: *Direct push detected on main*
-
-'
-              f'*Repo:* {repo}
-'
-              f'*Pushed by:* {pusher}
-'
-              f'*Commit:* {commit_msg}
-'
-              f'*Link:* {commit_url}
-
-'
+          lines = [
+              ':rotating_light: *Direct push detected on main*',
+              '',
+              '*Repo:* ' + repo,
+              '*Pushed by:* ' + pusher,
+              '*Commit:* ' + commit_msg,
+              '*Link:* ' + commit_url,
+              '',
               'All changes should go through Pull Requests. '
-              'Please use Mercury or create a PR instead of pushing directly.'
-          )
+              'Please use Son of Anton or create a PR instead of pushing directly.',
+          ]
+          message = NL.join(lines)
 
-          payload = json.dumps({
-              'channel': channel,
-              'text': message,
-          }).encode()
+          payload = json.dumps({'channel': channel, 'text': message}).encode()
 
           req = urllib.request.Request(
               'https://slack.com/api/chat.postMessage',
               data=payload,
               headers={
-                  'Authorization': f'Bearer {token}',
+                  'Authorization': 'Bearer ' + token,
                   'Content-Type': 'application/json',
               },
           )

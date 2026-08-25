@@ -162,7 +162,7 @@ jobs:
                 parents: [baseSha]
               });
 
-              const branch = `mercury/bulk-replace-${Date.now()}`;
+              const branch = `son-of-anton/bulk-replace-${Date.now()}`;
               await github.rest.git.createRef({
                 owner, repo: name,
                 ref: `refs/heads/${branch}`,
@@ -177,7 +177,7 @@ jobs:
               if (renamed.length > 0) prBody += `**Files renamed (${renamed.length}):**\n${renameList}\n\n`;
               prBody += `---\n`;
               if (requester_name) prBody += `**Requested by:** ${requester_name} (@${requester_username})\n`;
-              prBody += `**Via:** Mercury (Bulk Replace)`;
+              prBody += `**Via:** Son of Anton (Bulk Replace)`;
 
               const { data: pr } = await github.rest.pulls.create({
                 owner, repo: name,
