@@ -48,6 +48,7 @@ jobs:
           echo "requester_username=${{ github.event.client_payload.requester_username }}" >> $GITHUB_OUTPUT
           echo "slack_channel=${{ github.event.client_payload.slack_channel }}" >> $GITHUB_OUTPUT
           echo "slack_thread_ts=${{ github.event.client_payload.slack_thread_ts }}" >> $GITHUB_OUTPUT
+          echo "target_section=${{ github.event.client_payload.target_section }}" >> $GITHUB_OUTPUT
 
       - name: Extract subsections
         id: subsections
@@ -172,7 +173,8 @@ jobs:
           requester_username = '${{ steps.payload.outputs.requester_username }}'
           slack_channel = '${{ steps.payload.outputs.slack_channel }}'
           slack_thread_ts = '${{ steps.payload.outputs.slack_thread_ts }}'
-          result = run_pipeline(bundle_dir, mode=mode, requester_name=requester_name, requester_username=requester_username, slack_channel=slack_channel, slack_thread_ts=slack_thread_ts, subsections=subsections)
+          target_section = '${{ steps.payload.outputs.target_section }}'
+          result = run_pipeline(bundle_dir, mode=mode, requester_name=requester_name, requester_username=requester_username, slack_channel=slack_channel, slack_thread_ts=slack_thread_ts, subsections=subsections, target_section=target_section)
           print(f'[Slack Pipeline] Pipeline result: {result.get(\"status\", \"unknown\")}')
 
           # Save PR URLs and file paths for the notification step

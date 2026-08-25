@@ -353,21 +353,29 @@ class GitHubPublisher:
                 # Section found but no entries yet — append at end
                 insert_idx = len(lines)
             else:
-                # Section not found — create it as the FIRST section
-                # Find the first ## heading to insert before it
-                first_section_idx = None
-                for i, line in enumerate(lines):
-                    if line.strip().startswith("## "):
-                        first_section_idx = i
-                        break
+                # Section not found — create it.
+                # Releases repo: newest month on top (insert before first ## heading).
+                # Docs repo: insert before "## Discover More" so new sections
+                # land after existing content, not at the very top of the sidebar.
+                anchor_idx = None
+                if repo == DOCS_REPO:
+                    for i, line in enumerate(lines):
+                        if line.strip().lower().startswith("## discover more"):
+                            anchor_idx = i
+                            break
 
-                if first_section_idx is not None:
-                    # Insert new section heading + entry + blank line BEFORE first existing section
-                    lines.insert(first_section_idx, "")
-                    lines.insert(first_section_idx, entry)
-                    lines.insert(first_section_idx, "")
-                    lines.insert(first_section_idx, f"## {section_title}")
-                    lines.insert(first_section_idx, "")
+                if anchor_idx is None:
+                    for i, line in enumerate(lines):
+                        if line.strip().startswith("## "):
+                            anchor_idx = i
+                            break
+
+                if anchor_idx is not None:
+                    lines.insert(anchor_idx, "")
+                    lines.insert(anchor_idx, entry)
+                    lines.insert(anchor_idx, "")
+                    lines.insert(anchor_idx, f"## {section_title}")
+                    lines.insert(anchor_idx, "")
                 else:
                     # No sections exist at all — append at end
                     lines.append("")
@@ -466,18 +474,29 @@ class GitHubPublisher:
             if in_section:
                 insert_idx = len(lines)
             else:
-                first_section_idx = None
-                for i, line in enumerate(lines):
-                    if line.strip().startswith("## "):
-                        first_section_idx = i
-                        break
+                # Section not found — create it.
+                # Releases repo: newest month on top (insert before first ## heading).
+                # Docs repo: insert before "## Discover More" so new sections
+                # land after existing content, not at the very top of the sidebar.
+                anchor_idx = None
+                if repo == DOCS_REPO:
+                    for i, line in enumerate(lines):
+                        if line.strip().lower().startswith("## discover more"):
+                            anchor_idx = i
+                            break
 
-                if first_section_idx is not None:
+                if anchor_idx is None:
+                    for i, line in enumerate(lines):
+                        if line.strip().startswith("## "):
+                            anchor_idx = i
+                            break
+
+                if anchor_idx is not None:
                     for entry in reversed(all_entries):
-                        lines.insert(first_section_idx, entry)
-                    lines.insert(first_section_idx, "")
-                    lines.insert(first_section_idx, f"## {section_title}")
-                    lines.insert(first_section_idx, "")
+                        lines.insert(anchor_idx, entry)
+                    lines.insert(anchor_idx, "")
+                    lines.insert(anchor_idx, f"## {section_title}")
+                    lines.insert(anchor_idx, "")
                 else:
                     lines.append("")
                     lines.append(f"## {section_title}")
@@ -515,6 +534,7 @@ class GitHubPublisher:
         slack_channel: str = "",
         slack_thread_ts: str = "",
         subsections: dict = None,
+        target_section: str = "",
     ) -> dict:
         """Full publish flow: create branches, write files, patch impacted pages, open PRs.
 
@@ -674,8 +694,17 @@ class GitHubPublisher:
                         child_title = self._extract_title(child_dp.get("content", ""), child_slug.replace("-", " ").title())
                         summary_children.append({"title": child_title, "path": child_path})
 
-                    if target_path:
+                    # An explicit target_section (user-specified placement) always wins
+                    # over the per-child IA guess — a child's own target_path is not a
+                    # reliable signal for where the whole parent section belongs.
+                    if target_section:
+                        parent_section = target_section
+                    elif target_path:
                         parent_section = target_path.replace("-", " ").replace("/", " > ").title().split(" > ")[-1]
+                    else:
+                        parent_section = None
+
+                    if parent_section:
                         self._update_summary_nested(
                             DOCS_REPO, branch, parent_section,
                             f"{folder_path}/README.md", parent_title,

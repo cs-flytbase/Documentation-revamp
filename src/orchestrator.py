@@ -206,7 +206,7 @@ def fetch_exemplar(research_result: dict) -> str:
         return ""
 
 
-def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None) -> dict:
+def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "") -> dict:
     """Run the full documentation generation pipeline."""
     print("=" * 60)
     print("FlytBase Documentation Pipeline")
@@ -535,6 +535,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                 slack_thread_ts=slack_thread_ts,
                 mode=mode,
                 subsections=draft_result.get("_subsections"),
+                target_section=target_section,
             )
             if pr_results.get("releases_pr"):
                 print(f"    Releases PR: {pr_results['releases_pr']}")
