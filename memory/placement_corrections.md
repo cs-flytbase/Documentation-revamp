@@ -10,3 +10,5 @@ Appended to by the memory updater when placement is corrected in PRs.
 - [2026-07-15] [placement] Improve transitions between sections, especially before introducing Flex Factory and within the Introduction to Flex Factory.
 
 - [2026-08-18] [placement] Always place documentation under the correct section of the information architecture.
+
+- [2026-08-25] [placement] Always ensure that content is consolidated into the correct location and section to avoid duplication.
