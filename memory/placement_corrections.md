@@ -12,3 +12,5 @@ Appended to by the memory updater when placement is corrected in PRs.
 - [2026-08-18] [placement] Always place documentation under the correct section of the information architecture.
 
 - [2026-08-25] [placement] Always ensure that content is consolidated into the correct location and section to avoid duplication.
+
+- [2026-08-27] [placement] Always ensure that pages are created in their correct path to avoid breaking the documentation structure.
