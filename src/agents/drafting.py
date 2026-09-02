@@ -22,7 +22,15 @@ What pain goes away? What becomes possible that wasn't before?
 
 Structure (follow this order exactly):
 1. H1 title
-2. YouTube embed IMMEDIATELY after title: {% embed url="YOUTUBE_URL" %}
+2. YouTube embed IMMEDIATELY after the H1, on its own line, followed by a blank line:
+   {% embed url="https://youtu.be/VIDEO_ID" %}
+   Use the EXACT url given under YOUTUBE LINK below. This self-closing form is
+   what renders a video preview on the published page - do not add a caption
+   line or an {% endembed %} tag.
+   If YOUTUBE LINK says "None provided", OMIT the embed line entirely. Never
+   write the literal text YOUTUBE_URL, never write url="", and never invent a
+   video URL. A placeholder or empty embed renders as a broken block on the
+   live site.
 3. Opening narrative — describe the problem in concrete, real-world terms.
    Use the PM doc's exact examples (thermal wells, maintenance sheds, etc.)
    Keep the punchy, conversational tone from the PM doc.
@@ -610,6 +618,27 @@ Return the corrected doc page as JSON (include impacted_page_edits)."""
         warnings = []
         release_content = result.get("release_note", {}).get("content", "")
         doc_content = result.get("doc_page", {}).get("content", "")
+
+        # A placeholder or empty embed renders as a broken block on the live
+        # site. Two published release notes already carry one of these, written
+        # when no youtube_link reached the drafting agent.
+        for label, content in (("release note", release_content), ("doc page", doc_content)):
+            if not content:
+                continue
+            if 'url="YOUTUBE_URL"' in content or "url='YOUTUBE_URL'" in content:
+                warnings.append(
+                    f"CRITICAL: {label} contains the literal placeholder "
+                    f'{{% embed url="YOUTUBE_URL" %}} - replace it with the real URL or remove the embed'
+                )
+            if 'embed url=""' in content.replace(" ", "").replace('embedurl=""', 'embed url=""'):
+                warnings.append(
+                    f"CRITICAL: {label} contains an empty embed url - "
+                    "remove the embed rather than publishing a broken one"
+                )
+            if youtube_link and youtube_link not in content and "{% embed" in content:
+                warnings.append(
+                    f"{label} has an embed that does not use the supplied YouTube link ({youtube_link})"
+                )
 
         for filename in asset_filenames:
             # Check for proper image markdown syntax, not just raw filename

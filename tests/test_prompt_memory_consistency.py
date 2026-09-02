@@ -110,3 +110,23 @@ def test_failure_reasons_reach_slack():
     """A failed run used to drop its errors, leaving only 'check the Actions log'."""
     assert "Carry failure reasons through to Slack" in PIPELINE
     assert "Pipeline completed but no PRs were created" not in PIPELINE
+
+
+def test_prompt_specifies_the_real_embed_convention():
+    """The published convention is the self-closing form on its own line."""
+    d = Path("/tmp/draft.py").read_text()
+    assert '{% embed url="https://youtu.be/VIDEO_ID" %}' in d
+    assert "do not add a caption" in d
+
+
+def test_prompt_forbids_placeholder_and_empty_embeds():
+    """Two live release notes carry a literal YOUTUBE_URL / empty embed."""
+    d = Path("/tmp/draft.py").read_text()
+    assert "Never\n   write the literal text YOUTUBE_URL" in d or "never write url=" in d
+    assert "OMIT the embed line entirely" in d
+
+
+def test_validation_catches_broken_embeds():
+    d = Path("/tmp/draft.py").read_text()
+    assert 'url="YOUTUBE_URL"' in d and "CRITICAL" in d
+    assert "empty embed url" in d
