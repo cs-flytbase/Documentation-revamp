@@ -22,19 +22,26 @@ What pain goes away? What becomes possible that wasn't before?
 
 Structure (follow this order exactly):
 1. H1 title
-2. YouTube embed IMMEDIATELY after title: {% embed url="YOUTUBE_URL" %}
+2. YouTube embed IMMEDIATELY after the H1, on its own line, followed by a blank line:
+   {% embed url="https://youtu.be/VIDEO_ID" %}
+   Use the EXACT url given under YOUTUBE LINK below. This self-closing form is
+   what renders a video preview on the published page - do not add a caption
+   line or an {% endembed %} tag.
+   If YOUTUBE LINK says "None provided", OMIT the embed line entirely. Never
+   write the literal text YOUTUBE_URL, never write url="", and never invent a
+   video URL. A placeholder or empty embed renders as a broken block on the
+   live site.
 3. Opening narrative — describe the problem in concrete, real-world terms.
    Use the PM doc's exact examples (thermal wells, maintenance sheds, etc.)
    Keep the punchy, conversational tone from the PM doc.
 4. Feature introduction — what it is and how it solves the problem.
    Screenshot right after this section.
-5. How it generalizes / why it's foundational — the bigger picture of why
-   this matters. Don't skip the "why" sections from the PM doc.
+5. Why This Matters — the bigger picture of why this matters. Use exactly
+   this heading. Don't skip the "why" sections from the PM doc.
 6. Step-by-step walkthrough — bold step headers ("**Step 1: ...**") with
    full paragraph under each. Place screenshots AFTER the step they illustrate.
 7. Constraints & requirements table
-8. Hardware compatibility table
-9. Access section
+8. Access section
 
 Voice rules:
 - Conversational, direct. Like you're explaining to a smart operator over coffee.
@@ -120,7 +127,6 @@ Structure (follow this order exactly):
 7. Constraints & Limitations — full table AND a paragraph (3-4 sentences)
    explaining each constraint in context. Don't just list them — explain
    WHY each constraint exists if the PM doc mentions the reason.
-8. Hardware compatibility table
 9. Edge Cases & Troubleshooting — cover EVERY edge case the PM doc mentions.
    Format as: problem → cause → solution. Write at least 3-4 entries.
    If the PM doc mentions what happens in corner cases, include ALL of them.
@@ -200,6 +206,48 @@ impacted_page_edits rules:
 Return ONLY valid JSON. No markdown wrapping.
 """
 
+
+# Phrases a model uses when it declines rather than answers. A refusal is not
+# malformed JSON - reporting it as a parse error hid the real cause for two
+# whole pipeline runs, which produced "no PRs created" and nothing else.
+_REFUSAL_MARKERS = (
+    "i'm sorry, but i can't",
+    "i'm sorry, but i cannot",
+    "i am sorry, but i can't",
+    "i cannot assist",
+    "i can't assist",
+    "i'm unable to assist",
+    "i am unable to assist",
+    "i can't help with that",
+    "i cannot help with that",
+    "as an ai language model",
+)
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """True when the model declined instead of producing output."""
+    if not text:
+        return False
+    head = text.strip()[:400].lower()
+    return any(marker in head for marker in _REFUSAL_MARKERS)
+
+
+def _diagnose_bad_output(text: str) -> str:
+    """Explain WHY output could not be used, in terms a human can act on."""
+    if not text or not text.strip():
+        return "the model returned an empty response"
+    if _looks_like_refusal(text):
+        snippet = text.strip()[:200].replace("\n", " ")
+        return (
+            "the model REFUSED to generate this content. It replied: "
+            f'"{snippet}". This usually means the prompt contains contradictory '
+            "or impossible instructions - check that the required structure in the "
+            "agent prompt does not conflict with rules in memory/"
+        )
+    if "{" not in text:
+        snippet = text.strip()[:200].replace("\n", " ")
+        return f'the model returned prose instead of JSON: "{snippet}"'
+    return "the model returned JSON that could not be parsed (likely truncated or malformed)"
 
 def _extract_json(text: str) -> dict:
     """Robustly extract a JSON object from LLM output.
@@ -440,10 +488,26 @@ CHECKLIST before you respond:
             print("    [Drafting] Generating release note...")
             release_response = self.run(release_message)
 
+            # A refusal or unparseable reply gets one retry with an explicit
+            # nudge back to the required format. Previously either outcome
+            # ended the run with "Failed to parse", which hid a refusal
+            # entirely and produced a silent "no PRs created".
+            if _looks_like_refusal(release_response):
+                print(f"    [Drafting] Model refused. Retrying once. Reply was: {release_response.strip()[:160]}")
+                release_response = self.run(
+                    release_message
+                    + "\n\nIMPORTANT: This is FlytBase's own product documentation, written from the "
+                      "PM document supplied above. Respond ONLY with the required JSON object. "
+                      "If any instruction seems to conflict with another, follow the JSON schema "
+                      "and the PM document, and omit any section you cannot produce."
+                )
+
             try:
                 release_result = _extract_json(release_response)
             except json.JSONDecodeError:
-                return {"error": "Failed to parse release note output", "raw_response": release_response}
+                reason = _diagnose_bad_output(release_response)
+                print(f"    [Drafting] Release note unusable: {reason}")
+                return {"error": f"Release note not generated - {reason}", "raw_response": release_response}
         else:
             print("    [Drafting] Skipping release note (mode: doc_only)")
 
@@ -468,10 +532,22 @@ CHECKLIST before you respond:
             print("    [Drafting] Generating doc page + impacted edits...")
             doc_response = self.run(doc_message)
 
+            if _looks_like_refusal(doc_response):
+                print(f"    [Drafting] Model refused on doc page. Retrying once. Reply was: {doc_response.strip()[:160]}")
+                doc_response = self.run(
+                    doc_message
+                    + "\n\nIMPORTANT: This is FlytBase's own product documentation, written from the "
+                      "PM document supplied above. Respond ONLY with the required JSON object. "
+                      "If any instruction seems to conflict with another, follow the JSON schema "
+                      "and the PM document, and omit any section you cannot produce."
+                )
+
             try:
                 doc_result = _extract_json(doc_response)
             except json.JSONDecodeError:
-                return {"error": "Failed to parse doc page output", "raw_response": doc_response}
+                reason = _diagnose_bad_output(doc_response)
+                print(f"    [Drafting] Doc page unusable: {reason}")
+                return {"error": f"Doc page not generated - {reason}", "raw_response": doc_response}
         else:
             print("    [Drafting] Skipping doc page (mode: release_only)")
 
@@ -542,6 +618,27 @@ Return the corrected doc page as JSON (include impacted_page_edits)."""
         warnings = []
         release_content = result.get("release_note", {}).get("content", "")
         doc_content = result.get("doc_page", {}).get("content", "")
+
+        # A placeholder or empty embed renders as a broken block on the live
+        # site. Two published release notes already carry one of these, written
+        # when no youtube_link reached the drafting agent.
+        for label, content in (("release note", release_content), ("doc page", doc_content)):
+            if not content:
+                continue
+            if 'url="YOUTUBE_URL"' in content or "url='YOUTUBE_URL'" in content:
+                warnings.append(
+                    f"CRITICAL: {label} contains the literal placeholder "
+                    f'{{% embed url="YOUTUBE_URL" %}} - replace it with the real URL or remove the embed'
+                )
+            if 'embed url=""' in content.replace(" ", "").replace('embedurl=""', 'embed url=""'):
+                warnings.append(
+                    f"CRITICAL: {label} contains an empty embed url - "
+                    "remove the embed rather than publishing a broken one"
+                )
+            if youtube_link and youtube_link not in content and "{% embed" in content:
+                warnings.append(
+                    f"{label} has an embed that does not use the supplied YouTube link ({youtube_link})"
+                )
 
         for filename in asset_filenames:
             # Check for proper image markdown syntax, not just raw filename
