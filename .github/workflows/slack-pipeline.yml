@@ -90,10 +90,33 @@ jobs:
           links = kv_data.get('links', [])
           image_urls = kv_data.get('image_urls', [])
 
+          # Slack wraps links as '<url|display>'. Normalise before anything else.
+          def _clean(u):
+              u = (u or '').strip().lstrip('<').rstrip('>')
+              return u.split('|', 1)[0].strip()
+
+          links = [_clean(l) for l in links if _clean(l)]
+
+          # Separate video links from pages to scrape.
+          #
+          # A YouTube URL is an EMBED, not source material. Scraping the watch
+          # page pulls in the description, comments and recommended-video titles,
+          # which poisons the PM doc and has caused the drafting model to refuse
+          # outright. Video links go to youtube_link.txt for the embed instead.
+          _VIDEO_HOSTS = ('youtube.com', 'youtu.be', 'vimeo.com', 'loom.com', 'wistia.com')
+          video_links, page_links = [], []
+          for l in links:
+              (video_links if any(h in l.lower() for h in _VIDEO_HOSTS) else page_links).append(l)
+
+          if video_links:
+              print(f'[Slack Pipeline] Video link(s) kept for embedding, not scraped: {video_links}')
+          if page_links:
+              print(f'[Slack Pipeline] Page link(s) to scrape: {page_links}')
+
           # Combine all content sources into one string for the Source Agent
           content_parts = []
-          # Add any links (Source Agent will scrape them)
-          for link in links:
+          # Only non-video links are scraped
+          for link in page_links:
               content_parts.append(link)
           # Add text file contents
           for tf in text_files:
@@ -117,6 +140,13 @@ jobs:
           from pathlib import Path
           bundle_dir = f'input_bundles/{feature_name}'
           Path(bundle_dir).mkdir(parents=True, exist_ok=True)
+
+          # The drafting agent reads the embed URL from this file. Nothing in the
+          # Slack path used to write it, so every Slack-triggered release note was
+          # drafted with no YouTube embed available.
+          if video_links:
+              (Path(bundle_dir) / 'youtube_link.txt').write_text(video_links[0])
+              print(f'[Slack Pipeline] Wrote youtube_link.txt: {video_links[0]}')
 
           for i, url in enumerate(image_urls or []):
               if not url: continue
@@ -181,6 +211,15 @@ jobs:
           from datetime import datetime
           release_month = datetime.now().strftime('%B-%Y').lower()
           pr_results = result.get('pr_results', {})
+          # Carry failure reasons through to Slack. Without this, a failed run
+          # dropped its errors here and the thread only ever said 'no PRs were
+          # created. Check the Actions log' - which is what hid a model refusal
+          # for two consecutive runs.
+          if result.get('status') != 'success' or result.get('errors'):
+              merged = list(pr_results.get('errors', [])) + list(result.get('errors', []))
+              if not merged:
+                  merged = [f"pipeline status: {result.get('status', 'unknown')} (no reason reported)"]
+              pr_results['errors'] = merged
           draft = result.get('draft', {}) if 'draft' in result else {}
           rn = draft.get('release_note', {}) if draft else {}
           dp = draft.get('doc_page', {}) if draft else {}
@@ -244,7 +283,7 @@ jobs:
               for e in errors:
                   lines.append(f'  • {e}')
           if not lines:
-              lines.append(':x: Pipeline completed but no PRs were created. Check the Actions log.')
+              lines.append(':x: No PRs were created and the pipeline reported no reason. This is a bug - check the Actions log.')
 
           lines.append('')
           lines.append('Want me to change anything?')

@@ -74,10 +74,18 @@ class SourceAgent(BaseAgent):
 
         return urls, text_lines
 
+    # Video pages are embeds, not source material. Scraping a watch page pulls
+    # in descriptions, comments and recommended-video titles, which pollutes the
+    # PM doc and has caused the drafting model to refuse to generate at all.
+    VIDEO_HOSTS = ("youtube.com", "youtu.be", "vimeo.com", "loom.com", "wistia.com")
+
     def _scrape_urls(self, urls: list[str]) -> list[dict]:
         """Scrape URLs and return extracted content sections."""
         all_sections = []
         for i, url in enumerate(urls):
+            if any(h in url.lower() for h in self.VIDEO_HOSTS):
+                print(f"  [Source] Skipping video URL (embed, not source material): {url}")
+                continue
             print(f"  [Source] Scraping [{i+1}/{len(urls)}]: {url}")
             html = fetch_page(url)
             if not html:
