@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import yaml
 
 from src.config import PROJECT_ROOT, SETTINGS
+from src.doc_scope import CLOUD, get_scope
 from src.agents.research import ResearchAgent
 from src.agents.vision import VisionAgent
 from src.agents.drafting import DraftingAgent
@@ -159,9 +160,19 @@ def validate_input_bundle(bundle_path: str) -> dict:
     return result
 
 
-def load_ia_summary() -> str:
-    """Load a condensed IA structure for the research agent."""
-    ia_path = PROJECT_ROOT / "config" / "ia_structure.yaml"
+def load_ia_summary(doc_scope=CLOUD) -> str:
+    """Load a condensed IA structure for the research agent.
+
+    Each documentation set has its own information architecture, so a run
+    never sees the other set's tree.
+    """
+    ia_path = PROJECT_ROOT / doc_scope.ia_file
+    if not ia_path.exists():
+        raise FileNotFoundError(
+            f"No information architecture for {doc_scope.label} at "
+            f"{doc_scope.ia_file}. Add it before running a {doc_scope.label} "
+            "pipeline - without it the agent would place pages by guesswork."
+        )
     with open(ia_path) as f:
         data = yaml.safe_load(f)
 
@@ -178,8 +189,13 @@ def load_ia_summary() -> str:
     return "\n".join(lines)
 
 
-def fetch_exemplar(research_result: dict) -> str:
-    """Fetch a similar existing page from corpus to use as a style exemplar."""
+def fetch_exemplar(research_result: dict, doc_scope=CLOUD) -> str:
+    """Fetch a similar existing page from corpus to use as a style exemplar.
+
+    Restricted to the scope's namespace: an on-premise page must not be
+    styled on a cloud exemplar, which is how unrelated cloud sections have
+    leaked into generated pages before.
+    """
     from src.tools.corpus_store import search as corpus_search
     from sentence_transformers import SentenceTransformer
 
@@ -190,7 +206,7 @@ def fetch_exemplar(research_result: dict) -> str:
     try:
         model = SentenceTransformer(SETTINGS["pinecone"]["embedding_model"])
         embedding = model.encode(feature_summary, normalize_embeddings=True).tolist()
-        results = corpus_search(embedding, top_k=3)
+        results = corpus_search(embedding, top_k=3, namespace=doc_scope.corpus_namespace)
 
         # Pick the longest chunk as the exemplar (more detailed = better example)
         best = None
@@ -206,8 +222,15 @@ def fetch_exemplar(research_result: dict) -> str:
         return ""
 
 
-def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "") -> dict:
-    """Run the full documentation generation pipeline."""
+def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "") -> dict:
+    """Run the full documentation generation pipeline.
+
+    doc_scope ("cloud" or "onprem") selects the documentation set. It arrives
+    from the Slack button click in the dispatch payload and is never inferred
+    from the request text.
+    """
+    scope = get_scope(doc_scope)
+    print(f"Scope: {scope.label} - {scope.describe}")
     print("=" * 60)
     print("FlytBase Documentation Pipeline")
     print(f"Bundle: {bundle_path}")
@@ -232,7 +255,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     print(f"  Transcript: {len(bundle['transcript'])} chars" if bundle["transcript"] else "  Transcript: None")
 
     # Step 2: Load IA summary
-    ia_summary = load_ia_summary()
+    ia_summary = load_ia_summary(doc_scope=scope)
 
     # Step 3: Research + Vision in parallel
     print("\n[Step 3] Running Research and Vision agents in parallel...")
@@ -243,7 +266,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {}
 
-        research_agent = ResearchAgent()
+        research_agent = ResearchAgent(doc_scope=scope)
         futures[executor.submit(research_agent.research, pm_doc, ia_summary)] = "research"
 
         if bundle["asset_paths"]:
@@ -279,7 +302,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
 
     # Step 3.5: Fetch exemplar from corpus
     print("\n[Step 3.5] Fetching exemplar page from corpus...")
-    exemplar = fetch_exemplar(research_result)
+    exemplar = fetch_exemplar(research_result, doc_scope=scope)
     if exemplar:
         print(f"  Found exemplar ({len(exemplar)} chars)")
     else:
@@ -522,7 +545,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
             draft_result.get("release_note", {}).get("filename", "feature.md")
         ).stem
         try:
-            publisher = GitHubPublisher()
+            publisher = GitHubPublisher(doc_scope=scope)
             pr_results = publisher.publish(
                 draft_result=draft_result,
                 output_dir=str(output_dir),
@@ -536,6 +559,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                 mode=mode,
                 subsections=draft_result.get("_subsections"),
                 target_section=target_section,
+                doc_scope=scope.id,
             )
             if pr_results.get("releases_pr"):
                 print(f"    Releases PR: {pr_results['releases_pr']}")

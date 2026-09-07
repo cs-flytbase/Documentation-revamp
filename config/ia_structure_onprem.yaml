@@ -1,0 +1,30 @@
+# Information Architecture - On-Premise documentation
+#
+# PLACEHOLDER. This is a minimal tree matching on-premise/SUMMARY.md as it
+# stands today. Replace it with the real on-premise IA when that is ready.
+#
+# This file exists so that on-premise runs place pages against an on-premise
+# tree rather than the cloud one. It is deliberately a separate file from
+# config/ia_structure.yaml: the two documentation sets never share a taxonomy.
+#
+# Paths here are relative to the on-premise root, matching the cloud file's
+# convention of leading-slash URL slugs. The publisher roots them under
+# on-premise/ when it writes.
+
+ia_nodes:
+
+  - id: onprem-overview
+    label: On-Premise Overview
+    path: /overview
+
+  - id: onprem-installation
+    label: Installation
+    path: /installation
+
+  - id: onprem-configuration
+    label: Configuration
+    path: /configuration
+
+  - id: onprem-administration
+    label: Administration
+    path: /administration
