@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import yaml
 
 from src.config import PROJECT_ROOT, SETTINGS
-from src.doc_scope import CLOUD, assert_mode_allowed, effective_mode, get_scope
+from src.doc_scope import CLOUD, get_scope
 from src.agents.research import ResearchAgent
 from src.agents.vision import VisionAgent
 from src.agents.drafting import DraftingAgent
@@ -230,8 +230,6 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     from the request text.
     """
     scope = get_scope(doc_scope)
-    assert_mode_allowed(scope, mode)
-    mode = effective_mode(scope, mode)
     print(f"Scope: {scope.label} - {scope.describe}")
     print("=" * 60)
     print("FlytBase Documentation Pipeline")

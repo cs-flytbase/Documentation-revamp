@@ -15,14 +15,7 @@ from pathlib import Path
 import requests
 
 from src.config import GITHUB_TOKEN
-from src.doc_scope import (
-    CLOUD,
-    assert_in_scope,
-    assert_mode_allowed,
-    effective_mode,
-    get_scope,
-    scope_for_url,
-)
+from src.doc_scope import CLOUD, assert_in_scope, get_scope, scope_for_url
 
 
 DOCS_REPO = "FlytBaseAILabs/flytbase-docs"
@@ -590,15 +583,13 @@ class GitHubPublisher:
 
         doc_scope selects which documentation set this run writes to ("cloud"
         or "onprem"). It comes from the Slack button click, never from the
-        model. On-premise is documentation only, so a release note requested
-        in that scope is refused rather than written to the cloud repo.
+        model. Both sets have docs and release notes; the scope decides which
+        root inside each repo they land in.
 
         Returns dict with PR URLs and any errors.
         """
         if doc_scope:
             self.scope = get_scope(doc_scope)
-        assert_mode_allowed(self.scope, mode)
-        mode = effective_mode(self.scope, mode)
 
         branch = f"{self.scope.branch_prefix}/{feature_slug}-{int(time.time())}"
         output_path = Path(output_dir)
@@ -620,7 +611,7 @@ class GitHubPublisher:
                     # ── Subsections mode: folder with README.md + child files ──
                     parent_slug = subsections["parent_slug"]
                     parent_title = subsections["parent_title"]
-                    folder_path = f"{release_month}/{parent_slug}"
+                    folder_path = f"{self.scope.rooted(release_month)}/{parent_slug}"
 
                     # Write parent overview as README.md
                     self._write_file(
@@ -678,7 +669,7 @@ class GitHubPublisher:
                     # ── Standard single-file mode ──
                     filename = Path(release_note.get("filename", "release.md")).name
                     full_content = release_note.get("frontmatter", "") + "\n\n" + release_note.get("content", "")
-                    file_path = f"{release_month}/{filename}"
+                    file_path = f"{self.scope.rooted(release_month)}/{filename}"
                     self._write_file(RELEASES_REPO, file_path, full_content, branch, f"docs: add {feature_slug} release note")
 
                     slug_title = feature_slug.replace("-", " ").title()
@@ -688,7 +679,7 @@ class GitHubPublisher:
 
                     for asset_path in bundle_asset_paths:
                         cached = self._asset_cache.get(asset_path)
-                        err = self._upload_asset(RELEASES_REPO, asset_path, f"{release_month}/assets", branch, feature_slug, precompressed=cached)
+                        err = self._upload_asset(RELEASES_REPO, asset_path, f"{self.scope.rooted(release_month)}/assets", branch, feature_slug, precompressed=cached)
                         if err:
                             results["errors"].append(err)
 

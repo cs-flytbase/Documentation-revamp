@@ -143,3 +143,16 @@ def test_url_routing_is_scope_aware():
     i = PUB.index("def _url_to_repo_path(")
     j = PUB.find("\n    def ", i + 10)
     assert "scope_for_url(source_url)" in PUB[i:j]
+
+
+def test_release_paths_are_rooted_in_the_scope():
+    """On-premise release notes live in on-premise/ inside the releases repo."""
+    assert 'f"{release_month}/{filename}"' not in PUB
+    assert 'f"{release_month}/assets"' not in PUB
+    assert 'f"{release_month}/{parent_slug}"' not in PUB
+    assert PUB.count("self.scope.rooted(release_month)") >= 3
+
+
+def test_the_summary_section_heading_is_not_rooted():
+    """Files move under on-premise/; the sidebar heading stays "SEPTEMBER 2026"."""
+    assert 'section_title = release_month.replace("-", " ").upper()' in PUB

@@ -14,8 +14,6 @@ from src.doc_scope import (
     ONPREM,
     RELEASES_REPO,
     assert_in_scope,
-    assert_mode_allowed,
-    effective_mode,
     get_scope,
     scope_for_url,
 )
@@ -27,7 +25,6 @@ def test_cloud_is_unchanged():
     assert CLOUD.root == ""
     assert CLOUD.summary_path == "SUMMARY.md"
     assert CLOUD.branch_prefix == "docs"
-    assert CLOUD.allows_releases is True
     assert CLOUD.corpus_namespace == ""  # the namespace all existing content is in
     assert CLOUD.rooted("device-management/add-a-device") == "device-management/add-a-device"
 
@@ -100,35 +97,32 @@ def test_cloud_run_cannot_write_into_on_premise():
         assert_in_scope(CLOUD, "on-premise/install.md", DOCS_REPO)
 
 
-def test_on_premise_run_cannot_touch_the_releases_repo():
-    with pytest.raises(ValueError, match="does not cover"):
-        assert_in_scope(ONPREM, "on-premise/install.md", RELEASES_REPO)
+def test_on_premise_release_notes_go_in_the_on_premise_root():
+    """Both sets have release notes; the scope decides the root, not the repo."""
+    assert RELEASES_REPO in ONPREM.repos
+    assert_in_scope(ONPREM, "on-premise/september-2026/feature.md", RELEASES_REPO)
+
+
+def test_on_premise_cannot_write_a_cloud_release_path():
+    with pytest.raises(ValueError, match="outside the On-Premise scope"):
+        assert_in_scope(ONPREM, "september-2026/feature.md", RELEASES_REPO)
+
+
+def test_cloud_cannot_write_into_the_on_premise_releases_root():
+    with pytest.raises(ValueError, match="outside the Cloud scope"):
+        assert_in_scope(CLOUD, "on-premise/september-2026/feature.md", RELEASES_REPO)
 
 
 def test_the_allowed_writes_are_allowed():
     assert_in_scope(ONPREM, "on-premise/install/setup.md", DOCS_REPO)
+    assert_in_scope(ONPREM, "on-premise/september-2026/feature.md", RELEASES_REPO)
     assert_in_scope(CLOUD, "device-management/add.md", DOCS_REPO)
     assert_in_scope(CLOUD, "august-2026/feature.md", RELEASES_REPO)
 
 
-# ── Release notes ──────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("mode", ["both", "release_only"])
-def test_there_are_no_on_premise_release_notes(mode):
-    """Refused outright, rather than quietly written to the cloud releases repo."""
-    with pytest.raises(ValueError, match="documentation only"):
-        assert_mode_allowed(ONPREM, mode)
-
-
-def test_doc_only_is_fine_on_premise():
-    assert_mode_allowed(ONPREM, "doc_only")
-    assert effective_mode(ONPREM, "doc_only") == "doc_only"
-
-
-def test_cloud_still_publishes_release_notes():
-    for mode in ["both", "release_only", "doc_only"]:
-        assert_mode_allowed(CLOUD, mode)
-        assert effective_mode(CLOUD, mode) == mode
+def test_release_months_are_rooted_per_scope():
+    assert CLOUD.rooted("september-2026") == "september-2026"
+    assert ONPREM.rooted("september-2026") == "on-premise/september-2026"
 
 
 # ── URLs: one hostname, two documentation sets ─────────────────────────────
@@ -138,6 +132,7 @@ def test_cloud_still_publishes_release_notes():
     ("https://docs.flytbase.com/on-premise/install/setup", "onprem"),
     ("https://docs.flytbase.com/on-premise", "onprem"),
     ("https://releases.flytbase.com/august-2026/feature", "cloud"),
+    ("https://releases.flytbase.com/on-premise/september-2026/feature", "onprem"),
     ("https://docs.flytbase.com/on-premise-migration/guide", "cloud"),
 ])
 def test_url_resolves_to_the_right_documentation_set(url, expected):

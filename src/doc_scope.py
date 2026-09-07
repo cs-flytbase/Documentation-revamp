@@ -25,7 +25,6 @@ class DocScope:
     summary_path: str
     ia_file: str         # which information architecture the drafting agent uses
     corpus_namespace: str  # keeps on-prem retrieval away from cloud content
-    allows_releases: bool   # on-prem is documentation only
     summary_anchor: str     # heading a new section is inserted before
     url_prefix: str         # path prefix of this scope's live pages
     branch_prefix: str      # PR branches are named so reviewers can tell them apart
@@ -67,7 +66,6 @@ CLOUD = DocScope(
     summary_path="SUMMARY.md",
     ia_file="config/ia_structure.yaml",
     corpus_namespace="",  # default namespace - where all existing cloud content already lives
-    allows_releases=True,
     summary_anchor="## Discover More",
     url_prefix="",
     branch_prefix="docs",
@@ -77,16 +75,15 @@ CLOUD = DocScope(
 ONPREM = DocScope(
     id="onprem",
     label="On-Premise",
-    repos=(DOCS_REPO,),
+    repos=(DOCS_REPO, RELEASES_REPO),
     root=ONPREM_ROOT,
     summary_path=f"{ONPREM_ROOT}/SUMMARY.md",
     ia_file="config/ia_structure_onprem.yaml",
     corpus_namespace="onprem",
-    allows_releases=False,   # there are no on-premise release notes
     summary_anchor="",       # no cloud "Discover More" heading in the on-prem SUMMARY
     url_prefix=f"{ONPREM_ROOT}/",
     branch_prefix=ONPREM_ROOT,
-    describe="on-premise/ in the docs repo (documentation only, no release notes)",
+    describe="on-premise/ in the docs and releases repos",
 )
 
 SCOPES = {CLOUD.id: CLOUD, ONPREM.id: ONPREM}
@@ -114,13 +111,14 @@ def get_scope(scope_id: str) -> DocScope:
 def scope_for_url(url: str) -> DocScope:
     """Which documentation set a live page URL belongs to.
 
-    docs.flytbase.com/on-premise/... is on-premise; everything else is cloud.
+    Both hostnames serve both sets, so the host tells you the repo and the
+    path tells you the scope. Only the path can distinguish them.
     """
     u = (url or "").strip()
-    if "docs.flytbase.com" in u:
-        tail = normalize(u.split("docs.flytbase.com", 1)[-1])
-        if ONPREM.owns_path(tail):
-            return ONPREM
+    for host in ("docs.flytbase.com", "releases.flytbase.com"):
+        if host in u:
+            tail = normalize(u.split(host, 1)[-1])
+            return ONPREM if ONPREM.owns_path(tail) else CLOUD
     return CLOUD
 
 
@@ -134,26 +132,3 @@ def assert_in_scope(scope: DocScope, path: str, repo: str = None) -> None:
         raise ValueError(
             f"'{path}' is outside the {scope.label} scope ({scope.describe})."
         )
-
-
-def assert_mode_allowed(scope: DocScope, mode: str) -> None:
-    """On-premise covers documentation only.
-
-    A release note request in on-premise mode is refused rather than quietly
-    written into the cloud releases repo.
-    """
-    if scope.allows_releases:
-        return
-    if mode in ("both", "release_only"):
-        raise ValueError(
-            f"{scope.label} covers documentation only - there are no "
-            f"{scope.label} release notes. Use doc_only, or switch the thread "
-            "to Cloud for a release note."
-        )
-
-
-def effective_mode(scope: DocScope, mode: str) -> str:
-    """Narrow a run to what the scope actually supports."""
-    if scope.allows_releases:
-        return mode
-    return "doc_only"
