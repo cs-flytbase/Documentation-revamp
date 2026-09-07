@@ -9,11 +9,14 @@ models_groq:
 
 # OpenAI models (mid-tier, 128K context)
 models_openai:
-  source: gpt-4o
-  research: gpt-4o
-  vision: gpt-4o
-  drafting: gpt-4o
-  memory_updater: gpt-4o-mini
+  # gpt-4.1: 1M context (vs 128k), cheaper per token, same API surface.
+  # The larger window matters most for drafting, which carries the PM doc,
+  # research output, memory files and the exemplar in one prompt.
+  source: gpt-4.1
+  research: gpt-4.1
+  vision: gpt-4.1
+  drafting: gpt-4.1
+  memory_updater: gpt-4.1-mini
 
 # Anthropic models (production)
 models_anthropic:
