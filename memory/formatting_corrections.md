@@ -20,3 +20,10 @@ Appended to by the memory updater when formatting is corrected in PRs.
 - [2026-08-27] [formatting] These GitBook directives ARE supported and should be kept as-is: {% hint style="info|warning|danger|success" %}, {% content-ref %}, {% embed %}, {% tabs %}, and triple-backtick code fences. Note that FlytDocs flattens tabs into sequential sections, so don't rely on tabs to carry page structure.
 - [2026-08-27] [formatting] Lists: only ONE level of nested indentation is preserved. Do not rely on deeper nesting to convey structure.
 - [2026-08-27] [formatting] When unsure whether something will render, choose the plainest Markdown available and describe intent in words rather than reaching for a raw HTML tag.
+
+- [2026-09-07] [formatting] ON-PREMISE PAGES ONLY (paths under on-premise/): every page in Installation, System and Organization Configuration, Device Management, and Maintenance and Operations must open with this exact callout, immediately after the H1, before any body text:
+  {% hint style="danger" %}
+  Follow this documentation exactly as written. Do not deviate based on individual discretion.
+  {% endhint %}
+  This was a decision from the on-premise documentation strategy meeting. It does not apply to cloud pages, and it does not apply to on-premise release notes.
+- [2026-09-07] [formatting] ON-PREMISE PAGES ONLY: rollback is documented as a section inside the System Updates page, never as a page of its own.
