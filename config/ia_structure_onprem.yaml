@@ -1,30 +1,177 @@
 # Information Architecture - On-Premise documentation
 #
-# PLACEHOLDER. This is a minimal tree matching on-premise/SUMMARY.md as it
-# stands today. Replace it with the real on-premise IA when that is ready.
+# Derived from the on-premise documentation strategy meeting and the
+# accompanying whiteboard.
 #
-# This file exists so that on-premise runs place pages against an on-premise
-# tree rather than the cloud one. It is deliberately a separate file from
-# config/ia_structure.yaml: the two documentation sets never share a taxonomy.
+# Ordered by deployment lifecycle rather than by feature area. Cloud docs are
+# organised by feature because readers dip in and out; on-premise is worked
+# through once, in order, during a deployment, and revisited afterwards only
+# for the operations and troubleshooting sections.
 #
-# Paths here are relative to the on-premise root, matching the cloud file's
-# convention of leading-slash URL slugs. The publisher roots them under
-# on-premise/ when it writes.
+# Paths are relative to the on-premise root. The publisher roots them under
+# on-premise/ when it writes, so they are never written literally as-is.
+#
+# On-premise release notes are NOT in this file. They follow the cloud
+# convention exactly - one folder per month, listing what shipped that month -
+# and therefore have no information architecture of their own.
 
 ia_nodes:
 
-  - id: onprem-overview
-    label: On-Premise Overview
-    path: /overview
+  - id: onprem-introduction
+    label: Introduction to On-Premise
+    path: /introduction
+    children:
+      - id: onprem-what-is
+        label: What Is FlytBase On-Premise
+        path: /introduction/what-is-flytbase-on-premise
+      - id: onprem-unique
+        label: What Makes FlytBase On-Premise Unique
+        path: /introduction/what-makes-flytbase-on-premise-unique
+      - id: onprem-architectures
+        label: Deployment Architectures
+        path: /introduction/deployment-architectures
+      - id: onprem-scope-versioning
+        label: Documentation Scope and Versioning
+        path: /introduction/documentation-scope-and-versioning
+
+  - id: onprem-prerequisites
+    label: Prerequisites
+    path: /prerequisites
+    children:
+      - id: onprem-server-specs
+        label: Server Specifications
+        path: /prerequisites/server-specifications
+      - id: onprem-storage-requirements
+        label: Storage Requirements
+        path: /prerequisites/storage-requirements
+      - id: onprem-network-attached-storage
+        label: Network Attached Storage
+        path: /prerequisites/network-attached-storage
+      - id: onprem-network-requirements
+        label: Network Requirements
+        path: /prerequisites/network-requirements
+      - id: onprem-ports-protocols
+        label: Ports and Protocols
+        path: /prerequisites/ports-and-protocols
 
   - id: onprem-installation
     label: Installation
     path: /installation
+    children:
+      - id: onprem-iso-procurement
+        label: Procuring the ISO
+        path: /installation/procuring-the-iso
+      - id: onprem-iso-installation
+        label: Installing the ISO
+        path: /installation/installing-the-iso
+      - id: onprem-sovereign-cloud
+        label: Deploying on Sovereign Cloud
+        path: /installation/deploying-on-sovereign-cloud
+      - id: onprem-install-verification
+        label: Verifying the Installation
+        path: /installation/verifying-the-installation
 
+  # Node setup and organization setup are one continuous job done by the same
+  # person in the same sitting, so they live in one section.
   - id: onprem-configuration
-    label: Configuration
+    label: System and Organization Configuration
     path: /configuration
+    children:
+      - id: onprem-node-config
+        label: System and Node Configuration
+        path: /configuration/system-and-node-configuration
+      - id: onprem-org-settings
+        label: Organization-Level Settings
+        path: /configuration/organization-level-settings
+      - id: onprem-org-integrations
+        label: Organization Integrations
+        path: /configuration/organization-integrations
+        children:
+          - id: onprem-ldap
+            label: LDAP
+            path: /configuration/organization-integrations/ldap
+          - id: onprem-smtp
+            label: SMTP
+            path: /configuration/organization-integrations/smtp
+          - id: onprem-arcgis
+            label: ArcGIS
+            path: /configuration/organization-integrations/arcgis
+      - id: onprem-map-sources
+        label: Map Sources and Overlays
+        path: /configuration/map-sources-and-overlays
+      - id: onprem-vms
+        label: Video Management System
+        path: /configuration/video-management-system
+      - id: onprem-feature-availability
+        label: Feature Availability Without Email or Internet
+        path: /configuration/feature-availability-without-email-or-internet
 
-  - id: onprem-administration
-    label: Administration
-    path: /administration
+  - id: onprem-device-management
+    label: Device Management
+    path: /device-management
+    children:
+      - id: onprem-dock-network
+        label: Dock Network Configuration
+        path: /device-management/dock-network-configuration
+      - id: onprem-dock-registration
+        label: Registering and Activating a Dock
+        path: /device-management/registering-and-activating-a-dock
+      - id: onprem-static-ips
+        label: Changing Device Static IPs
+        path: /device-management/changing-device-static-ips
+      - id: onprem-swap-dock
+        label: Swapping or Removing a Dock
+        path: /device-management/swapping-or-removing-a-dock
+      - id: onprem-swap-drone
+        label: Swapping or Removing a Drone
+        path: /device-management/swapping-or-removing-a-drone
+
+  - id: onprem-maintenance
+    label: Maintenance and Operations
+    path: /maintenance
+    children:
+      # Rollback is a section within System Updates, not a page of its own.
+      - id: onprem-system-updates
+        label: System Updates
+        path: /maintenance/system-updates
+      - id: onprem-backup-restore
+        label: Backup and Restore
+        path: /maintenance/backup-and-restore
+      - id: onprem-media-storage
+        label: Managing Media Storage
+        path: /maintenance/managing-media-storage
+
+  - id: onprem-troubleshooting
+    label: Troubleshooting and Support
+    path: /troubleshooting
+    children:
+      - id: onprem-flight-logs
+        label: Accessing Flight Logs
+        path: /troubleshooting/accessing-flight-logs
+      - id: onprem-smtp-test
+        label: Testing SMTP Configuration
+        path: /troubleshooting/testing-smtp-configuration
+      - id: onprem-share-logs
+        label: Sharing Log Files with Support
+        path: /troubleshooting/sharing-log-files-with-support
+      - id: onprem-remote-access
+        label: Sharing Remote Access with Support
+        path: /troubleshooting/sharing-remote-access-with-support
+
+  # Last: reached once at purchase and rarely afterwards.
+  - id: onprem-licensing
+    label: Licensing and Activation
+    path: /licensing
+    children:
+      - id: onprem-partner-portal
+        label: Partner Portal Overview
+        path: /licensing/partner-portal-overview
+      - id: onprem-server-license
+        label: Activating a Server License
+        path: /licensing/activating-a-server-license
+      - id: onprem-org-subscription
+        label: Activating an Organization Subscription
+        path: /licensing/activating-an-organization-subscription
+      - id: onprem-activating-docks
+        label: Activating Docks
+        path: /licensing/activating-docks

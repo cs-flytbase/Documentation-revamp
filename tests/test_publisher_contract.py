@@ -156,3 +156,83 @@ def test_release_paths_are_rooted_in_the_scope():
 def test_the_summary_section_heading_is_not_rooted():
     """Files move under on-premise/; the sidebar heading stays "SEPTEMBER 2026"."""
     assert 'section_title = release_month.replace("-", " ").upper()' in PUB
+
+
+# ── The on-premise information architecture ────────────────────────────────
+
+def test_the_on_premise_ia_file_the_scope_points_at_exists_and_parses():
+    """A malformed tree would otherwise surface at drafting time, mid-run.
+
+    Deliberately does not import the orchestrator: that pulls in the whole
+    agent stack, and these tests run with only pytest and pyyaml.
+    """
+    import yaml
+    from src.doc_scope import ONPREM
+    path = ROOT / ONPREM.ia_file
+    assert path.exists(), f"{ONPREM.ia_file} is missing - on-premise runs raise"
+    data = yaml.safe_load(path.read_text())
+    labels = [n["label"] for n in data["ia_nodes"]]
+    for section in ["Introduction to On-Premise", "Prerequisites", "Installation",
+                    "System and Organization Configuration", "Device Management",
+                    "Maintenance and Operations", "Troubleshooting and Support",
+                    "Licensing and Activation"]:
+        assert section in labels, f"on-premise IA lost its {section!r} section"
+
+
+def test_every_ia_node_has_the_fields_the_loader_reads():
+    """load_ia_summary() does node['id'], node['label'], node['path'] - a node
+    missing any of them is a KeyError in the middle of a run."""
+    import yaml
+    for ia in ["config/ia_structure.yaml", "config/ia_structure_onprem.yaml"]:
+        data = yaml.safe_load((ROOT / ia).read_text())
+
+        def walk(nodes):
+            for n in nodes:
+                for field in ("id", "label", "path"):
+                    assert field in n, f"{ia}: node {n} has no {field!r}"
+                walk(n.get("children", []))
+
+        walk(data["ia_nodes"])
+
+
+def test_on_premise_ia_is_no_longer_the_placeholder():
+    import yaml
+    data = yaml.safe_load((ROOT / "config/ia_structure_onprem.yaml").read_text())
+    labels = [n["label"] for n in data["ia_nodes"]]
+    assert "On-Premise Overview" not in labels, (
+        "config/ia_structure_onprem.yaml is still the placeholder tree"
+    )
+    assert len(data["ia_nodes"]) >= 8
+
+
+def test_on_premise_ia_node_ids_are_unique():
+    """Duplicate ids silently collapse two sections into one placement target."""
+    import yaml
+    data = yaml.safe_load((ROOT / "config/ia_structure_onprem.yaml").read_text())
+    ids = []
+
+    def walk(nodes):
+        for n in nodes:
+            ids.append(n["id"])
+            walk(n.get("children", []))
+
+    walk(data["ia_nodes"])
+    dupes = {i for i in ids if ids.count(i) > 1}
+    assert not dupes, f"duplicate IA node ids: {sorted(dupes)}"
+
+
+def test_on_premise_ia_paths_are_scope_relative():
+    """Paths must not carry the on-premise/ root - the publisher adds it, and a
+    doubled root would write to on-premise/on-premise/..."""
+    import yaml
+    data = yaml.safe_load((ROOT / "config/ia_structure_onprem.yaml").read_text())
+    bad = []
+
+    def walk(nodes):
+        for n in nodes:
+            if n["path"].lstrip("/").startswith("on-premise"):
+                bad.append(n["path"])
+            walk(n.get("children", []))
+
+    walk(data["ia_nodes"])
+    assert not bad, f"IA paths already rooted, publisher would double them: {bad}"
