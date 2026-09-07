@@ -16,6 +16,7 @@ from sentence_transformers import SentenceTransformer
 
 from src.agents.base import BaseAgent
 from src.config import SETTINGS, PROJECT_ROOT
+from src.doc_scope import CLOUD
 from src.tools.corpus_store import search
 
 SYSTEM_PROMPT = """You are the Research Agent for the FlytBase documentation pipeline.
@@ -59,7 +60,7 @@ Rules:
 
 
 class ResearchAgent(BaseAgent):
-    def __init__(self):
+    def __init__(self, doc_scope=CLOUD):
         super().__init__(
             name="research",
             system_prompt=SYSTEM_PROMPT,
@@ -67,6 +68,10 @@ class ResearchAgent(BaseAgent):
             max_tokens=4096,
         )
         self._embed_model = None
+        # Every corpus query is confined to this scope's Pinecone namespace,
+        # so an on-premise run cannot retrieve cloud pages as context.
+        self.scope = doc_scope
+        self.namespace = doc_scope.corpus_namespace
 
     def _get_embed_model(self) -> SentenceTransformer:
         if self._embed_model is None:
@@ -145,7 +150,7 @@ PM Document:
         # Step 1: Vector search (same as before)
         for query in queries:
             embedding = model.encode(query, normalize_embeddings=True).tolist()
-            results = search(embedding, top_k=top_k_per_query)
+            results = search(embedding, top_k=top_k_per_query, namespace=self.namespace)
             for r in results:
                 chunk_id = r["id"]
                 if chunk_id not in all_results or r["score"] > all_results[chunk_id]["score"]:
@@ -206,7 +211,7 @@ PM Document:
         all_results = {}
         for query in sweep_queries:
             embedding = model.encode(query, normalize_embeddings=True).tolist()
-            results = search(embedding, top_k=top_k)
+            results = search(embedding, top_k=top_k, namespace=self.namespace)
             for r in results:
                 chunk_id = r["id"]
                 # Keep only results where source_url or ia_label contains the product area keyword

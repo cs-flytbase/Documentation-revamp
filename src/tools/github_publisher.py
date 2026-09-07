@@ -15,6 +15,14 @@ from pathlib import Path
 import requests
 
 from src.config import GITHUB_TOKEN
+from src.doc_scope import (
+    CLOUD,
+    assert_in_scope,
+    assert_mode_allowed,
+    effective_mode,
+    get_scope,
+    scope_for_url,
+)
 
 
 DOCS_REPO = "FlytBaseAILabs/flytbase-docs"
@@ -49,9 +57,10 @@ def _sanitize_target_path(raw: str) -> str:
 
 
 class GitHubPublisher:
-    def __init__(self):
+    def __init__(self, doc_scope=CLOUD):
         if not GITHUB_TOKEN:
             raise ValueError("GITHUB_TOKEN is not set in .env")
+        self.scope = doc_scope
         self.session = requests.Session()
         self.session.headers.update({
             "Authorization": f"token {GITHUB_TOKEN}",
@@ -91,6 +100,7 @@ class GitHubPublisher:
     def _write_file(self, repo: str, file_path: str, content: str, branch: str,
                     message: str, existing_sha: str | None = None) -> None:
         """Create or update a file on a branch."""
+        assert_in_scope(self.scope, file_path, repo)
         payload = {
             "message": message,
             "content": base64.b64encode(content.encode("utf-8")).decode("utf-8"),
@@ -272,12 +282,25 @@ class GitHubPublisher:
 
         https://docs.flytbase.com/some/path
         → (DOCS_REPO, "some/path.md")
+
+        https://docs.flytbase.com/on-premise/some/path
+        → (DOCS_REPO, "on-premise/some/path.md")
+
+        The on-premise pages live under the same hostname, so the hostname
+        alone does not identify the documentation set. A URL belonging to the
+        other scope is refused here rather than cross-linked into this run.
         """
         if "releases.flytbase.com" in source_url:
             path = source_url.split("releases.flytbase.com/", 1)[-1].rstrip("/")
             return RELEASES_REPO, f"{path}.md"
         elif "docs.flytbase.com" in source_url:
             path = source_url.split("docs.flytbase.com/", 1)[-1].rstrip("/")
+            url_scope = scope_for_url(source_url)
+            if url_scope.id != self.scope.id:
+                raise ValueError(
+                    f"{source_url} is a {url_scope.label} page, but this run is "
+                    f"{self.scope.label}. Cross-scope edits are not allowed."
+                )
             return DOCS_REPO, f"{path}.md"
         else:
             raise ValueError(f"Cannot determine repo for URL: {source_url}")
@@ -344,7 +367,8 @@ class GitHubPublisher:
         If the section doesn't exist, creates it as the first section
         (most recent month goes on top).
         """
-        summary_content, summary_sha = self._get_file(repo, "SUMMARY.md", branch)
+        summary_path = self.scope.summary_path
+        summary_content, summary_sha = self._get_file(repo, summary_path, branch)
         if summary_content is None:
             return
 
@@ -384,9 +408,10 @@ class GitHubPublisher:
                 # Docs repo: before "## Discover More", so a new section lands at
                 # the end of the sidebar rather than above Introduction to FlytBase.
                 anchor_idx = None
-                if repo == DOCS_REPO:
+                anchor = self.scope.summary_anchor.strip().lower()
+                if repo == DOCS_REPO and anchor:
                     for i, line in enumerate(lines):
-                        if line.strip().lower().startswith("## discover more"):
+                        if line.strip().lower().startswith(anchor):
                             anchor_idx = i
                             break
 
@@ -411,8 +436,8 @@ class GitHubPublisher:
 
                 updated = "\n".join(lines) + "\n"
                 self._write_file(
-                    repo, "SUMMARY.md", updated, branch,
-                    f"docs: add {page_title} to SUMMARY.md",
+                    repo, summary_path, updated, branch,
+                    f"docs: add {page_title} to {summary_path}",
                     existing_sha=summary_sha,
                 )
                 return
@@ -421,8 +446,8 @@ class GitHubPublisher:
         updated = "\n".join(lines) + "\n"
 
         self._write_file(
-            repo, "SUMMARY.md", updated, branch,
-            f"docs: add {page_title} to SUMMARY.md",
+            repo, summary_path, updated, branch,
+            f"docs: add {page_title} to {summary_path}",
             existing_sha=summary_sha,
         )
 
@@ -467,7 +492,8 @@ class GitHubPublisher:
           * [Parent Title](july-2026/parent-slug/README.md)
             * [Child Title](july-2026/parent-slug/child-slug.md)
         """
-        summary_content, summary_sha = self._get_file(repo, "SUMMARY.md", branch)
+        summary_path = self.scope.summary_path
+        summary_content, summary_sha = self._get_file(repo, summary_path, branch)
         if summary_content is None:
             return
 
@@ -501,9 +527,10 @@ class GitHubPublisher:
                 insert_idx = len(lines)
             else:
                 anchor_idx = None
-                if repo == DOCS_REPO:
+                anchor = self.scope.summary_anchor.strip().lower()
+                if repo == DOCS_REPO and anchor:
                     for i, line in enumerate(lines):
-                        if line.strip().lower().startswith("## discover more"):
+                        if line.strip().lower().startswith(anchor):
                             anchor_idx = i
                             break
 
@@ -527,8 +554,8 @@ class GitHubPublisher:
 
                 updated = "\n".join(lines) + "\n"
                 self._write_file(
-                    repo, "SUMMARY.md", updated, branch,
-                    f"docs: add {parent_title} (subsections) to SUMMARY.md",
+                    repo, summary_path, updated, branch,
+                    f"docs: add {parent_title} (subsections) to {summary_path}",
                     existing_sha=summary_sha,
                 )
                 return
@@ -538,8 +565,8 @@ class GitHubPublisher:
 
         updated = "\n".join(lines) + "\n"
         self._write_file(
-            repo, "SUMMARY.md", updated, branch,
-            f"docs: add {parent_title} (subsections) to SUMMARY.md",
+            repo, summary_path, updated, branch,
+            f"docs: add {parent_title} (subsections) to {summary_path}",
             existing_sha=summary_sha,
         )
 
@@ -557,12 +584,23 @@ class GitHubPublisher:
         slack_thread_ts: str = "",
         subsections: dict = None,
         target_section: str = "",
+        doc_scope: str = "",
     ) -> dict:
         """Full publish flow: create branches, write files, patch impacted pages, open PRs.
 
+        doc_scope selects which documentation set this run writes to ("cloud"
+        or "onprem"). It comes from the Slack button click, never from the
+        model. On-premise is documentation only, so a release note requested
+        in that scope is refused rather than written to the cloud repo.
+
         Returns dict with PR URLs and any errors.
         """
-        branch = f"docs/{feature_slug}-{int(time.time())}"
+        if doc_scope:
+            self.scope = get_scope(doc_scope)
+        assert_mode_allowed(self.scope, mode)
+        mode = effective_mode(self.scope, mode)
+
+        branch = f"{self.scope.branch_prefix}/{feature_slug}-{int(time.time())}"
         output_path = Path(output_dir)
         results = {"docs_pr": None, "releases_pr": None, "errors": []}
         # Cache compressed GIF bytes so we don't re-compress for the second repo
@@ -692,7 +730,10 @@ class GitHubPublisher:
                     # Use the first child's target_path for folder location
                     first_child_dp = subsections["children"][0]["draft"].get("doc_page", {})
                     target_path = _sanitize_target_path(first_child_dp.get("target_path", ""))
-                    folder_path = f"{target_path}/{parent_slug}" if target_path else parent_slug
+                    # target_path stays scope-relative (it names the sidebar
+                    # section); scoped_dir is where the files actually land.
+                    scoped_dir = self.scope.rooted(target_path)
+                    folder_path = f"{scoped_dir}/{parent_slug}" if scoped_dir else parent_slug
 
                     self._write_file(
                         DOCS_REPO, f"{folder_path}/README.md",
@@ -757,7 +798,8 @@ class GitHubPublisher:
                     filename = Path(doc_page.get("filename", "doc.md")).name
                     full_content = doc_page.get("frontmatter", "") + "\n\n" + doc_page.get("content", "")
                     target_path = _sanitize_target_path(doc_page.get("target_path", ""))
-                    file_path = f"{target_path}/{filename}" if target_path else filename
+                    scoped_dir = self.scope.rooted(target_path)
+                    file_path = f"{scoped_dir}/{filename}" if scoped_dir else filename
                     self._write_file(DOCS_REPO, file_path, full_content, branch, f"docs: add {feature_slug} doc page")
 
                     slug_title = feature_slug.replace("-", " ").title()
@@ -768,7 +810,7 @@ class GitHubPublisher:
 
                     for asset_path in bundle_asset_paths:
                         cached = self._asset_cache.get(asset_path)
-                        err = self._upload_asset(DOCS_REPO, asset_path, f"{target_path}/assets", branch, feature_slug, precompressed=cached)
+                        err = self._upload_asset(DOCS_REPO, asset_path, f"{scoped_dir}/assets", branch, feature_slug, precompressed=cached)
                         if err:
                             results["errors"].append(err)
 

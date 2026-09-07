@@ -1,0 +1,26 @@
+name: Tests
+
+# Both test files in tests/ were silently dead - one read a /tmp scratch path,
+# the other called read_text() on a str - and nothing noticed, because nothing
+# ran them. That is the same class of failure as the 11-day publish outage.
+# This workflow is what makes the tests mean something.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        # The tests here parse source and config rather than importing the
+        # heavy agent stack, so they deliberately do not install requirements.
+        run: pip install pytest pyyaml
+      - name: Run tests
+        run: pytest tests/ -q

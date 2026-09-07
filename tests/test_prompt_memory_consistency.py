@@ -9,9 +9,14 @@ These tests fail loudly if a prompt and a memory rule ever contradict again.
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[0]
-DRAFTING = Path("/tmp/draft.py").read_text()
-MEMORY = Path("/tmp/fmt.md").read_text()
+# These pointed at /tmp scratch copies left over from the session that wrote
+# them, so the module raised FileNotFoundError at collection and none of these
+# tests had ever run. They read the real files now.
+ROOT = Path(__file__).resolve().parents[1]
+DRAFTING = (ROOT / "src/agents/drafting.py").read_text()
+MEMORY = (ROOT / "memory/formatting_corrections.md").read_text()
+SOURCE = (ROOT / "src/agents/source.py").read_text()
+PIPELINE = (ROOT / ".github/workflows/slack-pipeline.yml").read_text()
 
 
 def test_prompt_does_not_mandate_hardware_compatibility():
@@ -74,8 +79,6 @@ def test_both_parse_sites_retry_before_giving_up():
     )
 
 
-SOURCE = Path("/tmp/source.py").read_text()
-PIPELINE = Path("/tmp/sp.yml").read_text()
 
 
 def test_source_agent_never_scrapes_video_pages():
@@ -114,19 +117,19 @@ def test_failure_reasons_reach_slack():
 
 def test_prompt_specifies_the_real_embed_convention():
     """The published convention is the self-closing form on its own line."""
-    d = Path("/tmp/draft.py").read_text()
+    d = DRAFTING
     assert '{% embed url="https://youtu.be/VIDEO_ID" %}' in d
     assert "do not add a caption" in d
 
 
 def test_prompt_forbids_placeholder_and_empty_embeds():
     """Two live release notes carry a literal YOUTUBE_URL / empty embed."""
-    d = Path("/tmp/draft.py").read_text()
+    d = DRAFTING
     assert "Never\n   write the literal text YOUTUBE_URL" in d or "never write url=" in d
     assert "OMIT the embed line entirely" in d
 
 
 def test_validation_catches_broken_embeds():
-    d = Path("/tmp/draft.py").read_text()
+    d = DRAFTING
     assert 'url="YOUTUBE_URL"' in d and "CRITICAL" in d
     assert "empty embed url" in d
