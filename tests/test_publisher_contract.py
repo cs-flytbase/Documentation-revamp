@@ -173,7 +173,8 @@ def test_the_on_premise_ia_file_the_scope_points_at_exists_and_parses():
     data = yaml.safe_load(path.read_text())
     labels = [n["label"] for n in data["ia_nodes"]]
     for section in ["Introduction to On-Premise", "Prerequisites", "Installation",
-                    "System and Organization Configuration", "Device Management",
+                    "System Configuration", "Organization Configuration",
+                    "Maps and Overlays", "Device Management",
                     "Maintenance and Operations", "Troubleshooting and Support",
                     "Licensing and Activation"]:
         assert section in labels, f"on-premise IA lost its {section!r} section"
@@ -202,7 +203,7 @@ def test_on_premise_ia_is_no_longer_the_placeholder():
     assert "On-Premise Overview" not in labels, (
         "config/ia_structure_onprem.yaml is still the placeholder tree"
     )
-    assert len(data["ia_nodes"]) >= 8
+    assert len(data["ia_nodes"]) >= 10
 
 
 def test_on_premise_ia_node_ids_are_unique():
@@ -236,3 +237,20 @@ def test_on_premise_ia_paths_are_scope_relative():
 
     walk(data["ia_nodes"])
     assert not bad, f"IA paths already rooted, publisher would double them: {bad}"
+
+
+def test_system_and_organization_configuration_stay_separate():
+    """They were one section; splitting them is the whole point of the change."""
+    import yaml
+    data = yaml.safe_load((ROOT / "config/ia_structure_onprem.yaml").read_text())
+    labels = [n["label"] for n in data["ia_nodes"]]
+    assert "System and Organization Configuration" not in labels
+    assert labels.index("System Configuration") < labels.index("Organization Configuration")
+
+
+def test_ldap_and_smtp_sit_under_user_access():
+    import yaml
+    data = yaml.safe_load((ROOT / "config/ia_structure_onprem.yaml").read_text())
+    org = next(n for n in data["ia_nodes"] if n["label"] == "Organization Configuration")
+    ua = next(c for c in org["children"] if c["label"] == "User Access")
+    assert {c["label"] for c in ua["children"]} == {"LDAP", "SMTP"}

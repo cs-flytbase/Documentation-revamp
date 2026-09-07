@@ -71,40 +71,64 @@ ia_nodes:
         label: Verifying the Installation
         path: /installation/verifying-the-installation
 
-  # Node setup and organization setup are one continuous job done by the same
-  # person in the same sitting, so they live in one section.
-  - id: onprem-configuration
-    label: System and Organization Configuration
-    path: /configuration
+  # System-level configuration: the server and its nodes.
+  - id: onprem-system-configuration
+    label: System Configuration
+    path: /system-configuration
     children:
       - id: onprem-node-config
         label: System and Node Configuration
-        path: /configuration/system-and-node-configuration
+        path: /system-configuration/system-and-node-configuration
+      - id: onprem-server-network
+        label: Server Network Configuration
+        path: /system-configuration/server-network-configuration
+      - id: onprem-media-storage-config
+        label: Media Storage Configuration
+        path: /system-configuration/media-storage-configuration
+
+  # Organization-level configuration: settings inside the platform, done per
+  # organization rather than per server.
+  - id: onprem-organization-configuration
+    label: Organization Configuration
+    path: /organization-configuration
+    children:
       - id: onprem-org-settings
         label: Organization-Level Settings
-        path: /configuration/organization-level-settings
-      - id: onprem-org-integrations
-        label: Organization Integrations
-        path: /configuration/organization-integrations
+        path: /organization-configuration/organization-level-settings
+      - id: onprem-user-access
+        label: User Access
+        path: /organization-configuration/user-access
         children:
           - id: onprem-ldap
             label: LDAP
-            path: /configuration/organization-integrations/ldap
+            path: /organization-configuration/user-access/ldap
           - id: onprem-smtp
             label: SMTP
-            path: /configuration/organization-integrations/smtp
-          - id: onprem-arcgis
-            label: ArcGIS
-            path: /configuration/organization-integrations/arcgis
-      - id: onprem-map-sources
-        label: Map Sources and Overlays
-        path: /configuration/map-sources-and-overlays
+            path: /organization-configuration/user-access/smtp
       - id: onprem-vms
         label: Video Management System
-        path: /configuration/video-management-system
+        path: /organization-configuration/video-management-system
       - id: onprem-feature-availability
         label: Feature Availability Without Email or Internet
-        path: /configuration/feature-availability-without-email-or-internet
+        path: /organization-configuration/feature-availability-without-email-or-internet
+
+  # Mapping stands on its own, mirroring "Maps and Overlays" in the cloud IA.
+  - id: onprem-maps
+    label: Maps and Overlays
+    path: /maps-and-overlays
+    children:
+      - id: onprem-map-tiles
+        label: Configuring Local Map Tiles
+        path: /maps-and-overlays/configuring-local-map-tiles
+      - id: onprem-arcgis
+        label: Connecting a Local ArcGIS Server
+        path: /maps-and-overlays/connecting-a-local-arcgis-server
+      - id: onprem-google-bing
+        label: Google and Bing Maps
+        path: /maps-and-overlays/google-and-bing-maps
+      - id: onprem-map-overlays
+        label: Map Overlays
+        path: /maps-and-overlays/map-overlays
 
   - id: onprem-device-management
     label: Device Management
@@ -125,6 +149,9 @@ ia_nodes:
       - id: onprem-swap-drone
         label: Swapping or Removing a Drone
         path: /device-management/swapping-or-removing-a-drone
+      - id: onprem-dock-to-cloud
+        label: Migrating a Dock from On-Premise to Cloud
+        path: /device-management/migrating-a-dock-from-on-premise-to-cloud
 
   - id: onprem-maintenance
     label: Maintenance and Operations
