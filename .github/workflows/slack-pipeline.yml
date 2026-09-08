@@ -66,15 +66,26 @@ jobs:
       - name: Fetch content from Worker KV and run pipeline
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          PL_FEATURE_NAME: ${{ steps.payload.outputs.feature_name }}
+          PL_MODE: ${{ steps.payload.outputs.mode }}
+          PL_CONTENT_KEY: ${{ steps.payload.outputs.content_key }}
+          PL_WORKER_URL: ${{ steps.payload.outputs.worker_url }}
+          PL_REQUESTER_NAME: ${{ steps.payload.outputs.requester_name }}
+          PL_REQUESTER_USERNAME: ${{ steps.payload.outputs.requester_username }}
+          PL_SLACK_CHANNEL: ${{ steps.payload.outputs.slack_channel }}
+          PL_SLACK_THREAD_TS: ${{ steps.payload.outputs.slack_thread_ts }}
+          PL_TARGET_SECTION: ${{ steps.payload.outputs.target_section }}
+          PL_DOC_SCOPE: ${{ steps.payload.outputs.doc_scope }}
+          PL_HAS_SUBSECTIONS: ${{ steps.subsections.outputs.has_subsections }}
         run: |
-          python3 -c "
+          python3 <<'PYEOF'
           import json, os, sys, urllib.request
           sys.path.insert(0, '.')
 
-          feature_name = '${{ steps.payload.outputs.feature_name }}'
-          mode = '${{ steps.payload.outputs.mode }}' or 'both'
-          content_key = '${{ steps.payload.outputs.content_key }}'
-          worker_url = '${{ steps.payload.outputs.worker_url }}'
+          feature_name = os.environ.get('PL_FEATURE_NAME', '')
+          mode = os.environ.get('PL_MODE', '') or 'both'
+          content_key = os.environ.get('PL_CONTENT_KEY', '')
+          worker_url = os.environ.get('PL_WORKER_URL', '')
           slack_token = os.environ.get('SLACK_BOT_TOKEN', '')
 
           # Step 0: Fetch content from Worker KV
@@ -177,7 +188,7 @@ jobs:
           )
 
           if source_result.get('error'):
-              print(f'Source Agent failed: {source_result[\"error\"]}')
+              print(f'Source Agent failed: {source_result["error"]}')
               sys.exit(1)
 
           pm_doc = source_result['pm_doc']
@@ -189,27 +200,27 @@ jobs:
 
           # Step 1.5: Load subsections if present
           subsections = None
-          has_subsections = '${{ steps.subsections.outputs.has_subsections }}'
+          has_subsections = os.environ.get('PL_HAS_SUBSECTIONS', '')
           if has_subsections == 'true':
               import os
               sub_path = '/tmp/subsections.json'
               if os.path.exists(sub_path):
                   with open(sub_path) as sf:
                       subsections = json.load(sf)
-                  print(f'[Slack Pipeline] Subsections: {len(subsections.get(\"children\", []))} children under \"{subsections.get(\"parent_title\", \"\")}\"')
+                  print(f'[Slack Pipeline] Subsections: {len(subsections.get("children", []))} children under "{subsections.get("parent_title", "")}"')
 
           # Step 2: Run the existing pipeline
           print('[Slack Pipeline] Running pipeline...')
-          requester_name = '${{ steps.payload.outputs.requester_name }}'
-          requester_username = '${{ steps.payload.outputs.requester_username }}'
-          slack_channel = '${{ steps.payload.outputs.slack_channel }}'
-          slack_thread_ts = '${{ steps.payload.outputs.slack_thread_ts }}'
-          target_section = '${{ steps.payload.outputs.target_section }}'
+          requester_name = os.environ.get('PL_REQUESTER_NAME', '')
+          requester_username = os.environ.get('PL_REQUESTER_USERNAME', '')
+          slack_channel = os.environ.get('PL_SLACK_CHANNEL', '')
+          slack_thread_ts = os.environ.get('PL_SLACK_THREAD_TS', '')
+          target_section = os.environ.get('PL_TARGET_SECTION', '')
           # Set by the Cloud / On-Premise button in Slack. Empty means cloud,
           # which is where every page lived before on-premise existed.
-          doc_scope = '${{ steps.payload.outputs.doc_scope }}'
+          doc_scope = os.environ.get('PL_DOC_SCOPE', '')
           result = run_pipeline(bundle_dir, mode=mode, requester_name=requester_name, requester_username=requester_username, slack_channel=slack_channel, slack_thread_ts=slack_thread_ts, subsections=subsections, target_section=target_section, doc_scope=doc_scope)
-          print(f'[Slack Pipeline] Pipeline result: {result.get(\"status\", \"unknown\")}')
+          print(f'[Slack Pipeline] Pipeline result: {result.get("status", "unknown")}')
 
           # Save PR URLs and file paths for the notification step
           from datetime import datetime
@@ -227,25 +238,27 @@ jobs:
           draft = result.get('draft', {}) if 'draft' in result else {}
           rn = draft.get('release_note', {}) if draft else {}
           dp = draft.get('doc_page', {}) if draft else {}
-          pr_results['release_note_file'] = f'{release_month}/{rn.get(\"filename\", \"\")}' if rn.get('filename') else ''
+          pr_results['release_note_file'] = f'{release_month}/{rn.get("filename", "")}' if rn.get('filename') else ''
           pr_results['doc_page_file'] = dp.get('filename', '')
           with open('pr_results.json', 'w') as f:
               json.dump(pr_results, f)
-          "
+          PYEOF
 
       - name: Notify Slack
         if: always()
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          PL_CONTENT_KEY: ${{ steps.payload.outputs.content_key }}
+          PL_WORKER_URL: ${{ steps.payload.outputs.worker_url }}
         run: |
-          python3 -c "
+          python3 <<'PYEOF'
           import json, os, urllib.request
 
           token = os.environ['SLACK_BOT_TOKEN']
 
           # Fetch Slack channel/thread info from KV
-          content_key = '${{ steps.payload.outputs.content_key }}'
-          worker_url = '${{ steps.payload.outputs.worker_url }}'
+          content_key = os.environ.get('PL_CONTENT_KEY', '')
+          worker_url = os.environ.get('PL_WORKER_URL', '')
           channel = ''
           thread_ts = ''
           try:
@@ -313,7 +326,7 @@ jobs:
               print(f'Posted to Slack: {channel}/{thread_ts}')
           else:
               print(f'No Slack channel/thread info. PR results: {message}')
-          "
+          PYEOF
 
       - name: Upload pipeline output
         if: always()
