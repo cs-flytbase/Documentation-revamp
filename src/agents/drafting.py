@@ -559,14 +559,14 @@ CHECKLIST before you respond:
         }
 
         # ── Validate and auto-retry ───────────────────────────────────
-        warnings = self._validate_output(combined, asset_filenames, youtube_link, pm_doc)
+        warnings = self._validate_output(combined, asset_filenames, youtube_link, pm_doc, mode)
         if warnings:
             critical_warnings = [w for w in warnings if "missing from" in w or "too short" in w]
             if critical_warnings:
                 print(f"    [Drafting] Auto-retrying due to: {critical_warnings}")
                 combined = self._auto_retry(combined, critical_warnings, context, asset_filenames, youtube_link, pm_doc)
                 # Re-validate after retry
-                warnings = self._validate_output(combined, asset_filenames, youtube_link, pm_doc)
+                warnings = self._validate_output(combined, asset_filenames, youtube_link, pm_doc, mode)
 
             if warnings:
                 combined["_validation_warnings"] = warnings
@@ -614,7 +614,7 @@ Return the corrected doc page as JSON (include impacted_page_edits)."""
 
         return current_result
 
-    def _validate_output(self, result, asset_filenames, youtube_link, pm_doc):
+    def _validate_output(self, result, asset_filenames, youtube_link, pm_doc, mode="both"):
         warnings = []
         release_content = result.get("release_note", {}).get("content", "")
         doc_content = result.get("doc_page", {}).get("content", "")
@@ -656,9 +656,12 @@ Return the corrected doc page as JSON (include impacted_page_edits)."""
             if yt_pos > 500:
                 warnings.append(f"YouTube link placed too far down in release note (position {yt_pos})")
 
-        if len(release_content) < 3000:
+        # Only hold the outputs this mode asked for to a length bar. An empty
+        # release note in doc_only mode is correct, and flagging it triggered a
+        # retry that drafted a release note nobody requested.
+        if mode in ("both", "release_only") and len(release_content) < 3000:
             warnings.append(f"Release note too short ({len(release_content)} chars, need 3000+)")
-        if len(doc_content) < 4000:
+        if mode in ("both", "doc_only") and len(doc_content) < 4000:
             warnings.append(f"Doc page too short ({len(doc_content)} chars, need 4000+)")
 
         pm_headings = re.findall(r'^##\s+\*?\*?(.+?)\*?\*?\s*$', pm_doc, re.MULTILINE)
