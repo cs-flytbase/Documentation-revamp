@@ -7,16 +7,16 @@ models_groq:
   drafting: llama-3.3-70b-versatile         # best available for writing quality
   memory_updater: llama-3.1-8b-instant      # fast, lightweight for rule extraction
 
-# OpenAI models (mid-tier, 128K context)
+# OpenAI-compatible models, served through OpenRouter (OPENAI_BASE_URL)
 models_openai:
-  # gpt-4.1: 1M context (vs 128k), cheaper per token, same API surface.
-  # The larger window matters most for drafting, which carries the PM doc,
+  # gpt-5.6-luna: 1.05M context, accepts images, so it covers vision too.
+  # The large window matters most for drafting, which carries the PM doc,
   # research output, memory files and the exemplar in one prompt.
-  source: gpt-4.1
-  research: gpt-4.1
-  vision: gpt-4.1
-  drafting: gpt-4.1
-  memory_updater: gpt-4.1-mini
+  source: openai/gpt-5.6-luna
+  research: openai/gpt-5.6-luna
+  vision: openai/gpt-5.6-luna
+  drafting: openai/gpt-5.6-luna
+  memory_updater: openai/gpt-5.6-luna
 
 # Anthropic models (production)
 models_anthropic:

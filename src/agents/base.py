@@ -1,14 +1,14 @@
 """Base agent — supports Groq, OpenAI, and Anthropic backends."""
 
 from src.config import (
-    GROQ_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY,
+    GROQ_API_KEY, OPENAI_API_KEY, OPENAI_BASE_URL, ANTHROPIC_API_KEY,
     LLM_PROVIDER, get_model_for_agent,
 )
 
 
 def _get_openai_client():
     from openai import OpenAI
-    return OpenAI(api_key=OPENAI_API_KEY)
+    return OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
 
 
 def _get_groq_client():

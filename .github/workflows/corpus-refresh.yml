@@ -44,7 +44,8 @@ jobs:
           cat > .env << ENVEOF
           PINECONE_API_KEY=${{ secrets.PINECONE_API_KEY }}
           PINECONE_INDEX_NAME=flytbase-docs
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_BASE_URL=https://openrouter.ai/api/v1
           LLM_PROVIDER=openai
           ENVEOF
 
