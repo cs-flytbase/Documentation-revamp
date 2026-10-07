@@ -25,7 +25,10 @@ SETTINGS = load_settings()
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# The OpenAI SDK talks to any OpenAI-compatible API; OPENAI_BASE_URL points it
+# at OpenRouter. OPENROUTER_API_KEY wins; OPENAI_API_KEY is kept for local runs.
+OPENAI_API_KEY = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") or None
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 
@@ -39,7 +42,7 @@ def get_model_for_agent(agent_name: str) -> str:
     models = SETTINGS.get(models_key, {})
     fallbacks = {
         "groq": "llama-3.3-70b-versatile",
-        "openai": "gpt-4.1",
+        "openai": "openai/gpt-5.6-luna",
         "anthropic": "claude-sonnet-4-6",
     }
-    return models.get(agent_name, fallbacks.get(LLM_PROVIDER, "gpt-4.1"))
+    return models.get(agent_name, fallbacks.get(LLM_PROVIDER, "openai/gpt-5.6-luna"))
