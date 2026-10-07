@@ -229,6 +229,12 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     from the Slack button click in the dispatch payload and is never inferred
     from the request text.
     """
+    # A subsections block with no children is not a subsections request. Some
+    # models fill the optional tool field with an empty skeleton; treating it as
+    # real drafted only a blank parent page and crashed the publisher on
+    # children[0].
+    if subsections and not subsections.get("children"):
+        subsections = None
     scope = get_scope(doc_scope)
     print(f"Scope: {scope.label} - {scope.describe}")
     print("=" * 60)
