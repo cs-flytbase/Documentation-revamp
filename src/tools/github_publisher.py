@@ -15,6 +15,7 @@ from pathlib import Path
 import requests
 
 from src.config import GITHUB_TOKEN
+from src.diag import report_exception
 from src.doc_scope import CLOUD, assert_in_scope, get_scope, scope_for_url
 
 
@@ -265,7 +266,7 @@ class GitHubPublisher:
             return None  # Success
 
         except Exception as e:
-            return f"Asset upload failed ({asset_name}): {e}"
+            return report_exception(f"Asset upload failed ({asset_name})", e)
 
     def _url_to_repo_path(self, source_url: str) -> tuple[str, str]:
         """Convert a source URL to (repo, file_path).
@@ -696,7 +697,7 @@ class GitHubPublisher:
                         patched = self._apply_patch(existing_content, edit.get("section_heading", ""), edit.get("patch_mode", "append"), edit.get("patch_content", ""))
                         self._write_file(RELEASES_REPO, file_path, patched, branch, f"docs: update {file_path} — cross-reference {feature_slug}", existing_sha=existing_sha)
                     except Exception as e:
-                        results["errors"].append(f"Failed to patch {url}: {e}")
+                        results["errors"].append(report_exception(f"Failed to patch {url}", e))
 
                 self._protect_readme(RELEASES_REPO, branch)
 
@@ -706,7 +707,7 @@ class GitHubPublisher:
                     pr_body = self._build_pr_body(rn_title, release_note, impacted_edits, "releases", requester_name, requester_username, slack_channel, slack_thread_ts)
                     results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {rn_title}", pr_body)
             except Exception as e:
-                results["errors"].append(f"Releases repo failed: {e}")
+                results["errors"].append(report_exception("Releases repo failed", e))
 
         # ── Docs repo ──────────────────────────────────────────────────────
         if mode != "release_only":
@@ -818,7 +819,7 @@ class GitHubPublisher:
                         patched = self._apply_patch(existing_content, edit.get("section_heading", ""), edit.get("patch_mode", "append"), edit.get("patch_content", ""))
                         self._write_file(DOCS_REPO, file_path, patched, branch, f"docs: update {file_path} — cross-reference {feature_slug}", existing_sha=existing_sha)
                     except Exception as e:
-                        results["errors"].append(f"Failed to patch {url}: {e}")
+                        results["errors"].append(report_exception(f"Failed to patch {url}", e))
 
                 self._protect_readme(DOCS_REPO, branch)
 
@@ -828,7 +829,7 @@ class GitHubPublisher:
                     pr_body = self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username, slack_channel, slack_thread_ts)
                     results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {dp_title}", pr_body)
             except Exception as e:
-                results["errors"].append(f"Docs repo failed: {e}")
+                results["errors"].append(report_exception("Docs repo failed", e))
 
         return results
 
