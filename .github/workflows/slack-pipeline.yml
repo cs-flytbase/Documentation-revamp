@@ -281,12 +281,23 @@ jobs:
           except Exception as e:
               print(f'Could not fetch Slack info from KV: {e}')
 
-          # Read PR results
+          # Read PR results. No file means the pipeline step crashed before
+          # it could write one.
           pr_results = {}
+          crashed = False
           try:
               with open('pr_results.json') as f:
                   pr_results = json.load(f)
-          except: pass
+          except Exception:
+              crashed = True
+
+          # Every message links its run, so anyone (including Son of Anton's
+          # diagnose_failure) can go from the thread straight to the log.
+          run_url = '{}/{}/actions/runs/{}'.format(
+              os.environ.get('GITHUB_SERVER_URL', 'https://github.com'),
+              os.environ.get('GITHUB_REPOSITORY', ''),
+              os.environ.get('GITHUB_RUN_ID', ''),
+          )
 
           releases_pr = pr_results.get('releases_pr', '')
           docs_pr = pr_results.get('docs_pr', '')
@@ -309,10 +320,13 @@ jobs:
               lines.append(':warning: *Errors:*')
               for e in errors:
                   lines.append(f'  • {e}')
-          if not lines:
-              lines.append(':x: No PRs were created and the pipeline reported no reason. This is a bug - check the Actions log.')
+          if not lines and crashed:
+              lines.append(':x: The pipeline crashed before it could publish anything. Ask me why it failed and I will check the run.')
+          elif not lines:
+              lines.append(':x: No PRs were created and the pipeline reported no reason. Ask me why it failed and I will check the run.')
 
           lines.append('')
+          lines.append(f'Run: {run_url}')
           lines.append('Want me to change anything?')
 
           message = '\n'.join(lines)
