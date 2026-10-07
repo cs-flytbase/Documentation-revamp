@@ -1,4 +1,7 @@
 name: Slack DocAgent Pipeline
+# The thread id in the run title is how Son of Anton's diagnose_failure finds
+# the runs that belong to a Slack thread.
+run-name: "slack-pipeline: ${{ github.event.client_payload.feature_name }} [thread ${{ github.event.client_payload.slack_thread_ts }}]"
 
 on:
   repository_dispatch:
@@ -82,6 +85,8 @@ jobs:
           python3 <<'PYEOF'
           import json, os, sys, urllib.request
           sys.path.insert(0, '.')
+          from src.diag import annotate, annotate_errors, install_excepthook
+          install_excepthook()
 
           feature_name = os.environ.get('PL_FEATURE_NAME', '')
           mode = os.environ.get('PL_MODE', '') or 'both'
@@ -190,6 +195,7 @@ jobs:
 
           if source_result.get('error'):
               print(f'Source Agent failed: {source_result["error"]}')
+              annotate(f'Source Agent failed: {source_result["error"]}', title='Source Agent failed')
               sys.exit(1)
 
           pm_doc = source_result['pm_doc']
@@ -243,6 +249,9 @@ jobs:
           pr_results['doc_page_file'] = dp.get('filename', '')
           with open('pr_results.json', 'w') as f:
               json.dump(pr_results, f)
+          # Errors that were returned rather than raised still need an annotation,
+          # or a run that published nothing shows up as a clean success.
+          annotate_errors(pr_results.get('errors', []))
           PYEOF
 
       - name: Notify Slack

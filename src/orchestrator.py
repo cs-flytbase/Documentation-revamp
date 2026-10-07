@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import yaml
 
 from src.config import PROJECT_ROOT, SETTINGS
+from src.diag import report_exception
 from src.doc_scope import CLOUD, get_scope
 from src.agents.research import ResearchAgent
 from src.agents.vision import VisionAgent
@@ -303,8 +304,9 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                         print(f"    - {v.get('file_name', '?')} → {section}: {v.get('description', '')[:60]}...")
             except Exception as e:
                 print(f"  {agent_name} agent FAILED: {e}")
+                reported = report_exception(f"{agent_name.capitalize()} agent failed", e)
                 if agent_name == "research":
-                    return {"status": "failed", "errors": [f"Research agent failed: {e}"]}
+                    return {"status": "failed", "errors": [reported]}
 
     # Step 3.5: Fetch exemplar from corpus
     print("\n[Step 3.5] Fetching exemplar page from corpus...")
@@ -577,6 +579,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                     print(f"      - {e}")
         except Exception as e:
             print(f"    GitHub publish failed: {e}")
+            report_exception("GitHub publish failed", e)
 
     # Step 8: Auto-generate feature note for memory system
     _save_feature_note(draft_result, research_result, pm_doc, Path(bundle_path).name)
