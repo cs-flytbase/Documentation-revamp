@@ -27,3 +27,5 @@ Appended to by the memory updater when reviewers correct voice/tone issues.
 - [2026-08-19] [voice] NEVER use em dashes (—) in release notes or docs. Use commas, periods, colons, or parentheses instead.
 - [2026-08-19] [voice] NEVER use slashes in headings (e.g. "How It Generalizes / Why It is Foundational"). Use a single, conventional heading. No dual titles.
 - [2026-08-19] [voice] Use "Why This Matters" as the standard heading for the section explaining broader impact. Do not use "How It Generalizes" or "Why It is Foundational".
+
+- [2026-10-15] [voice] After providing the resolution or outcome, stop. Do not add further explanation, repetition, or status commentary unless the user asks a follow-up question.
