@@ -314,8 +314,21 @@ jobs:
                   lines.append('  File: ' + chr(96) + rn_file + chr(96) + ' in FlytBaseAILabs/flytbase-releases')
           if docs_pr:
               lines.append(f':white_check_mark: *Doc Page PR:* {docs_pr}')
-              if dp_file:
-                  lines.append('  File: ' + chr(96) + dp_file + chr(96) + ' in FlytBaseAILabs/flytbase-docs')
+              # Say where the page landed, so a wrong section is visible here
+              # instead of being discovered after merge.
+              docs_file = pr_results.get('docs_file') or dp_file
+              if pr_results.get('docs_section'):
+                  lines.append('  Placed under: *' + pr_results['docs_section'] + '*')
+              if docs_file:
+                  lines.append('  File: ' + chr(96) + docs_file + chr(96) + ' in FlytBaseAILabs/flytbase-docs')
+              impacted = pr_results.get('docs_impacted') or []
+              if impacted:
+                  lines.append(f'  Also adds cross-links to {len(impacted)} existing page(s): ' + ', '.join(chr(96) + f + chr(96) for f in impacted))
+          warnings = pr_results.get('warnings') or []
+          if warnings:
+              lines.append(':warning: *Check before merging:*')
+              for w in warnings:
+                  lines.append(f'  • {w}')
           if errors:
               lines.append(':warning: *Errors:*')
               for e in errors:

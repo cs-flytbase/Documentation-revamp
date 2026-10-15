@@ -16,6 +16,9 @@ import requests
 
 from src.config import GITHUB_TOKEN
 from src.diag import report_exception
+from src.summary_placement import (
+    insert_entries, insert_entry, relative_to_summary, repo_path_for, resolve_section,
+)
 from src.doc_scope import CLOUD, assert_in_scope, get_scope, scope_for_url
 
 
@@ -349,6 +352,35 @@ class GitHubPublisher:
             )
 
         return "".join(new_lines)
+
+    def _resolve_placement(self, repo: str, branch: str, target_section: str, guessed_path: str, results: dict):
+        """Where a new page goes: the section the user asked for, read from SUMMARY.md.
+
+        Returns (placement or None, summary text, summary sha). A requested
+        section that cannot be found is reported in results["warnings"] - never
+        silently replaced by the pipeline's own guess. With no request, the
+        guess is resolved against SUMMARY.md the same way; None means fall
+        back to the legacy heading match.
+        """
+        summary_path = self.scope.summary_path
+        text, sha = self._get_file(repo, summary_path, branch)
+        if text is None:
+            results.setdefault("warnings", []).append(f"Could not read {summary_path}; the sidebar entry was not added.")
+            return None, None, None
+        if target_section:
+            placement = resolve_section(text, target_section)
+            if placement:
+                return placement, text, sha
+            results.setdefault("warnings", []).append(
+                f"Requested section \"{target_section}\" was not found (or is ambiguous) in {summary_path}, "
+                f"so the page was placed by the pipeline's own guess instead. Check the location before merging."
+            )
+        if guessed_path:
+            guess = " > ".join(seg.replace("-", " ") for seg in guessed_path.split("/"))
+            placement = resolve_section(text, guess, allow_leaf=False)
+            if placement:
+                return placement, text, sha
+        return None, text, sha
 
     def _update_summary(self, repo: str, branch: str, section_title: str,
                         file_path: str, page_title: str) -> None:
@@ -696,6 +728,7 @@ class GitHubPublisher:
                             continue
                         patched = self._apply_patch(existing_content, edit.get("section_heading", ""), edit.get("patch_mode", "append"), edit.get("patch_content", ""))
                         self._write_file(RELEASES_REPO, file_path, patched, branch, f"docs: update {file_path} — cross-reference {feature_slug}", existing_sha=existing_sha)
+                        results.setdefault("releases_impacted", []).append(file_path)
                     except Exception as e:
                         results["errors"].append(report_exception(f"Failed to patch {url}", e))
 
@@ -727,6 +760,14 @@ class GitHubPublisher:
                     scoped_dir = self.scope.rooted(target_path)
                     folder_path = f"{scoped_dir}/{parent_slug}" if scoped_dir else parent_slug
 
+                    # The requested section decides the folder too, not just
+                    # the sidebar line: files used to land in the child's
+                    # guessed folder even when the entry was under Flex Factory.
+                    placement, summary_text, summary_sha = self._resolve_placement(
+                        DOCS_REPO, branch, target_section, target_path, results)
+                    if placement:
+                        folder_path = repo_path_for(placement.folder, parent_slug, self.scope.summary_path)
+
                     self._write_file(
                         DOCS_REPO, f"{folder_path}/README.md",
                         subsections["parent_content"], branch,
@@ -754,19 +795,35 @@ class GitHubPublisher:
                     # target_path is not a reliable signal for where the whole
                     # parent section belongs - that is how "Aeroflo" became a
                     # top-level section instead of "Flex Factory".
-                    if target_section:
-                        parent_section = target_section
-                    elif target_path:
-                        parent_section = target_path.replace("-", " ").replace("/", " > ").title().split(" > ")[-1]
+                    summary_path = self.scope.summary_path
+                    rel = lambda p: relative_to_summary(p, summary_path)
+                    if placement:
+                        entries = [(parent_title, rel(f"{folder_path}/README.md"), 0)] + [
+                            (c["title"], rel(c["path"]), 1) for c in summary_children
+                        ]
+                        updated = insert_entries(summary_text, placement, entries)
+                        if updated != summary_text:
+                            self._write_file(
+                                DOCS_REPO, summary_path, updated, branch,
+                                f"docs: add {parent_title} (subsections) to {summary_path}",
+                                existing_sha=summary_sha,
+                            )
+                        results["docs_section"] = placement.label
                     else:
-                        parent_section = None
-
-                    if parent_section:
-                        self._update_summary_nested(
-                            DOCS_REPO, branch, parent_section,
-                            f"{folder_path}/README.md", parent_title,
-                            summary_children,
-                        )
+                        if target_section:
+                            parent_section = target_section
+                        elif target_path:
+                            parent_section = target_path.replace("-", " ").replace("/", " > ").title().split(" > ")[-1]
+                        else:
+                            parent_section = None
+                        if parent_section:
+                            self._update_summary_nested(
+                                DOCS_REPO, branch, parent_section,
+                                rel(f"{folder_path}/README.md"), parent_title,
+                                [{**c, "path": rel(c["path"])} for c in summary_children],
+                            )
+                        results["docs_section"] = parent_section or "(not added to the sidebar)"
+                    results["docs_file"] = f"{folder_path}/README.md"
 
                     for asset_path in bundle_asset_paths:
                         cached = self._asset_cache.get(asset_path)
@@ -779,6 +836,7 @@ class GitHubPublisher:
                         impacted_edits, "docs",
                         requester_name, requester_username, slack_channel, slack_thread_ts,
                     )
+                    pr_body = self._placement_block(results) + pr_body
                     results["docs_pr"] = self._create_pr(
                         DOCS_REPO, branch,
                         f"📄 New Doc Pages: {parent_title} ({len(summary_children)} subsections)",
@@ -790,19 +848,43 @@ class GitHubPublisher:
                     filename = Path(doc_page.get("filename", "doc.md")).name
                     full_content = doc_page.get("frontmatter", "") + "\n\n" + doc_page.get("content", "")
                     target_path = _sanitize_target_path(doc_page.get("target_path", ""))
-                    scoped_dir = self.scope.rooted(target_path)
-                    file_path = f"{scoped_dir}/{filename}" if scoped_dir else filename
-                    self._write_file(DOCS_REPO, file_path, full_content, branch, f"docs: add {feature_slug} doc page")
-
                     slug_title = feature_slug.replace("-", " ").title()
                     doc_title = self._extract_title(doc_page.get("content", ""), slug_title)
-                    parent_section = target_path.replace("-", " ").replace("/", " > ").title() if target_path else ""
-                    if parent_section:
-                        self._update_summary(DOCS_REPO, branch, parent_section.split(" > ")[-1], file_path, doc_title)
+                    summary_path = self.scope.summary_path
+
+                    # The section the user asked for wins over the model's
+                    # target_path guess. This path used to ignore it entirely,
+                    # which put "Smart Flight Logs" (asked for under Flex
+                    # Factory) under Post-Flight Modules.
+                    placement, summary_text, summary_sha = self._resolve_placement(
+                        DOCS_REPO, branch, target_section, target_path, results)
+                    if placement:
+                        file_path = repo_path_for(placement.folder, filename, summary_path)
+                    else:
+                        scoped = self.scope.rooted(target_path)
+                        file_path = f"{scoped}/{filename}" if scoped else filename
+                    scoped_dir = str(Path(file_path).parent) if "/" in file_path else ""
+                    self._write_file(DOCS_REPO, file_path, full_content, branch, f"docs: add {feature_slug} doc page")
+
+                    rel_path = relative_to_summary(file_path, summary_path)
+                    if placement:
+                        updated = insert_entry(summary_text, placement, doc_title, rel_path)
+                        if updated != summary_text:
+                            self._write_file(
+                                DOCS_REPO, summary_path, updated, branch,
+                                f"docs: add {doc_title} to {summary_path}", existing_sha=summary_sha,
+                            )
+                        results["docs_section"] = placement.label
+                    else:
+                        parent_section = target_path.replace("-", " ").replace("/", " > ").title() if target_path else ""
+                        if parent_section:
+                            self._update_summary(DOCS_REPO, branch, parent_section.split(" > ")[-1], rel_path, doc_title)
+                        results["docs_section"] = parent_section or "(not added to the sidebar)"
+                    results["docs_file"] = file_path
 
                     for asset_path in bundle_asset_paths:
                         cached = self._asset_cache.get(asset_path)
-                        err = self._upload_asset(DOCS_REPO, asset_path, f"{scoped_dir}/assets", branch, feature_slug, precompressed=cached)
+                        err = self._upload_asset(DOCS_REPO, asset_path, f"{scoped_dir}/assets" if scoped_dir else "assets", branch, feature_slug, precompressed=cached)
                         if err:
                             results["errors"].append(err)
 
@@ -818,6 +900,7 @@ class GitHubPublisher:
                             continue
                         patched = self._apply_patch(existing_content, edit.get("section_heading", ""), edit.get("patch_mode", "append"), edit.get("patch_content", ""))
                         self._write_file(DOCS_REPO, file_path, patched, branch, f"docs: update {file_path} — cross-reference {feature_slug}", existing_sha=existing_sha)
+                        results.setdefault("docs_impacted", []).append(file_path)
                     except Exception as e:
                         results["errors"].append(report_exception(f"Failed to patch {url}", e))
 
@@ -826,7 +909,7 @@ class GitHubPublisher:
                 if not subsections:
                     slug_title = feature_slug.replace("-", " ").title()
                     dp_title = self._extract_title(doc_page.get("content", ""), slug_title)
-                    pr_body = self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username, slack_channel, slack_thread_ts)
+                    pr_body = self._placement_block(results) + self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username, slack_channel, slack_thread_ts)
                     results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {dp_title}", pr_body)
             except Exception as e:
                 results["errors"].append(report_exception("Docs repo failed", e))
@@ -916,6 +999,18 @@ class GitHubPublisher:
             lines.append(f"**Slack thread:** https://flytbase.slack.com/archives/{slack_channel}/p{thread_id}")
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _placement_block(results: dict) -> str:
+        """Where the page landed, and any placement warning, at the top of the PR."""
+        lines = []
+        if results.get("docs_section"):
+            lines.append(f"**Placed under:** {results['docs_section']}")
+        if results.get("docs_file"):
+            lines.append(f"**Path:** `{results['docs_file']}`")
+        for w in results.get("warnings", []):
+            lines.append(f"> ⚠️ {w}")
+        return ("\n\n".join(lines) + "\n\n---\n\n") if lines else ""
 
     def _build_pr_body(self, feature_title: str, page: dict, impacted_edits: list, repo_type: str,
                        requester_name: str = "", requester_username: str = "",
