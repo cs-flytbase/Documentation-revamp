@@ -39,3 +39,29 @@ def test_both_still_flags_short_outputs():
 
 def test_doc_only_still_flags_a_short_doc_page():
     assert _too_short(_validate("doc_only", doc="short"), "Doc page")
+
+
+YT = "https://youtu.be/hJ36_XdT8og"
+
+
+def _validate_yt(mode, doc="", release=""):
+    agent = DraftingAgent.__new__(DraftingAgent)
+    result = {"release_note": {"content": release}, "doc_page": {"content": doc}}
+    return agent._validate_output(result, [], YT, "", mode)
+
+
+def test_doc_page_with_a_plain_video_link_is_sent_back():
+    """Smart Flight Logs: the video came out as a plain link above the Overview."""
+    doc = f"# Smart Flight Logs\n\n[Watch the video]({YT})\n\n## Overview\n\n" + "x" * 5000
+    warnings = _validate_yt("doc_only", doc=doc)
+    assert any("YouTube embed missing from doc page" in w for w in warnings)
+
+
+def test_doc_page_with_the_embed_passes():
+    doc = f"# Smart Flight Logs\n\n## Overview\n\nText.\n\n{{% embed url=\"{YT}\" %}}\n\n" + "x" * 5000
+    assert not any("YouTube" in w for w in _validate_yt("doc_only", doc=doc))
+
+
+def test_doc_only_does_not_ask_for_the_video_in_a_release_note():
+    doc = f"## Overview\n\n{{% embed url=\"{YT}\" %}}\n" + "x" * 5000
+    assert not any("release note" in w.lower() for w in _validate_yt("doc_only", doc=doc))

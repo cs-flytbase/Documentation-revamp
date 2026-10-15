@@ -110,6 +110,12 @@ Structure (follow this order exactly):
    - How it fits into the broader product workflow
    - Who should use it and when
    - What the key benefit is for daily operations
+   VIDEO: if a YOUTUBE LINK is provided below, embed it on its own line at the
+   END of the Overview section, using exactly:
+   {% embed url="<the exact YOUTUBE LINK>" %}
+   Never as a plain Markdown link, never above the Overview. If the PM document
+   or the request says where the video must go, put it there instead. If the
+   YOUTUBE LINK says "None provided", there is no video.
 4. How It Works — a dedicated section (2-3 paragraphs minimum) explaining the
    underlying mechanism in plain English. Not steps — conceptual understanding.
    What happens under the hood when the operator uses this feature? What does
@@ -648,10 +654,21 @@ Return the corrected doc page as JSON (include impacted_page_edits)."""
             if doc_content and img_ref not in doc_content:
                 warnings.append(f"Asset '{filename}' missing from doc page (must use ![alt](assets/{filename}) format)")
 
-        if youtube_link and youtube_link not in release_content:
+        wants_release = mode in ("both", "release_only")
+        wants_doc = mode in ("both", "doc_only")
+
+        if wants_release and youtube_link and youtube_link not in release_content:
             warnings.append("YouTube link not in release note")
 
-        if youtube_link and youtube_link in release_content:
+        # The doc page prompt had no video rule, so a requested video came out
+        # as a plain link above the Overview. Require the real embed.
+        if wants_doc and youtube_link and doc_content and f'{{% embed url="{youtube_link}" %}}' not in doc_content:
+            warnings.append(
+                f'YouTube embed missing from doc page (must be {{% embed url="{youtube_link}" %}} '
+                "on its own line at the end of the Overview, not a plain link)"
+            )
+
+        if wants_release and youtube_link and youtube_link in release_content:
             yt_pos = release_content.index(youtube_link)
             if yt_pos > 500:
                 warnings.append(f"YouTube link placed too far down in release note (position {yt_pos})")
