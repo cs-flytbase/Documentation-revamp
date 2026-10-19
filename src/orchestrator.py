@@ -421,7 +421,15 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                 draft_result.setdefault("_style_report", {}).setdefault(key, []).extend(f"{cr['slug']}: {i}" for i in items)
             draft_result.setdefault("_doc_gaps", []).extend(f"{cr['slug']}: {g}" for g in cr["draft"].get("_doc_gaps", []))
 
-        print(f"  Subsection drafting complete. {len(child_results)} children + 1 parent.")
+        # Each page used only its own feature's assets; make sure, across all of
+        # them, that every asset found a page.
+        used_text = "\n".join(
+            (cr["draft"].get(k) or {}).get("content", "") for cr in child_results for k in ("doc_page", "release_note"))
+        unused = [a for a in bundle["asset_filenames"] if f"](assets/{a})" not in used_text]
+        for a in unused:
+            draft_result.setdefault("_style_report", {}).setdefault("doc_page", []).append(
+                f"[warn] {a} was not used on any page. Add it where it belongs, or drop it.")
+        print(f"  Subsection drafting complete. {len(child_results)} children + 1 parent. Unused assets: {unused or 'none'}")
         print(f"    Impacted page edits: {len(draft_result['impacted_page_edits'])}")
 
     else:

@@ -272,6 +272,12 @@ class DraftingAgent(BaseAgent):
     ) -> dict:
         descs = {v.get("file_name", ""): v.get("description", "") for v in (vision_output or [])}
         doc_assets, rel_required, rel_optional = route_assets(asset_filenames, asset_audience)
+        # One page of a subsections run sees every asset of the run but should
+        # use only those that show its own feature. Nothing is required of it;
+        # coverage across all the pages is checked by the orchestrator.
+        whole_run = not subsection_focus
+        if not whole_run:
+            rel_optional, rel_required = rel_required + rel_optional, []
         context = self._build_context(pm_doc, research_output, transcript, exemplar)
         # Videos are read frame by frame but never embedded; what they show is
         # source material for both outputs.
@@ -323,14 +329,16 @@ Use only the assets relevant to this scope.
         if wants_doc:
             doc_msg = "\n\n".join([
                 "Fill in the doc page fields from this source material.", context,
-                self._asset_block("DOC ASSETS", doc_assets, descs, "Use EVERY one exactly once, on the step or section it shows."),
+                self._asset_block("DOC ASSETS", doc_assets, descs,
+                                  "Use EVERY one exactly once, on the step or section it shows." if whole_run else
+                                  "These cover the whole release. Use ONLY the ones that show this subsection, each at most once, on the step or section it shows."),
                 self._rules_for("doc"),
             ])
             print("    [Drafting] Generating doc page + impacted edits...")
             doc_fields, err = self._call_json(DOC_PAGE_PROMPT, doc_msg, "doc page")
             if doc_fields is None:
                 return {"error": f"Doc page not generated - {err}"}
-            problems = check_doc_fields(doc_fields, doc_assets)
+            problems = check_doc_fields(doc_fields, doc_assets, require_all=whole_run)
             if problems:
                 doc_fields = self._retry_fields(DOC_PAGE_PROMPT, doc_msg, doc_fields, problems, "doc page")
         else:
@@ -340,12 +348,12 @@ Use only the assets relevant to this scope.
         style_report, gaps = {}, []
         doc_result, release_result = {}, {}
         if doc_fields:
-            doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, descs)
+            doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, descs, place_leftovers=whole_run)
             doc_result, issues = self._style_pass("doc", doc_result)
             if style_errors(issues):
                 doc_fields = self._retry_fields(DOC_PAGE_PROMPT, doc_msg, doc_fields,
                                                 [f"style: {i.message}" for i in style_errors(issues)], "doc page style")
-                doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, descs)
+                doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, descs, place_leftovers=whole_run)
                 doc_result, issues = self._style_pass("doc", doc_result)
             if issues:
                 style_report["doc_page"] = [f"[{i.severity}] {i}" for i in issues][:15]

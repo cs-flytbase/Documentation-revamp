@@ -186,8 +186,12 @@ def interface_gaps(data: dict) -> list[str]:
     return missing
 
 
-def check_fields(data: dict, doc_assets: list[str]) -> list[str]:
-    """Problems with the model's fields, phrased for a targeted retry."""
+def check_fields(data: dict, doc_assets: list[str], require_all: bool = True) -> list[str]:
+    """Problems with the model's fields, phrased for a targeted retry.
+
+    require_all is False for one page of a subsections run: that page may use
+    any of the run's assets but only needs the ones that show its feature.
+    """
     problems = []
     for key in ("title", "description", "overview"):
         if not _clean(data.get(key)):
@@ -206,7 +210,7 @@ def check_fields(data: dict, doc_assets: list[str]) -> list[str]:
     for a in used:
         if a not in doc_assets:
             problems.append(f"doc page uses asset '{a}' that is not in DOC ASSETS")
-    for a in doc_assets:
+    for a in (doc_assets if require_all else []):
         if a not in used:
             problems.append(f"asset '{a}' missing from doc page (put it on the step or section it shows)")
     for a in {x for x in used if used.count(x) > 1}:
@@ -215,7 +219,7 @@ def check_fields(data: dict, doc_assets: list[str]) -> list[str]:
 
 
 def render(data: dict, doc_assets: list[str], youtube_link: str = "",
-           asset_descriptions: dict | None = None) -> tuple[dict, list[str]]:
+           asset_descriptions: dict | None = None, place_leftovers: bool = True) -> tuple[dict, list[str]]:
     """Build the doc page. Returns ({"filename","frontmatter","content","target_path"}, gaps)."""
     descs = asset_descriptions or {}
     gaps: list[str] = []
@@ -340,7 +344,9 @@ def render(data: dict, doc_assets: list[str], youtube_link: str = "",
         out += ["## Related Pages", ""] + [f"- [{_clean(r['title'])}]({_clean(r['url'])})" for r in related] + [""]
 
     # A doc asset is never dropped: anything left goes at the end of How To.
-    leftover = [a for a in doc_assets if a not in used]
+    # Not on one page of a subsections run: there, an unused asset belongs to
+    # another feature's page, not at the end of this one.
+    leftover = [a for a in doc_assets if a not in used] if place_leftovers else []
     if leftover:
         at = out.index("## Behaviour and Rules")
         extra = []
