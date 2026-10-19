@@ -1,0 +1,66 @@
+# Rules the style checker (src/style_check.py) enforces in code on every
+# release note and doc page. Nothing here depends on a model remembering it,
+# so this list can grow to hundreds of entries without getting less reliable.
+#
+# Add a rule here when reviewer feedback is mechanical: a phrase to ban, a
+# term to spell one way, a claim that must never be made. Judgment rules
+# (tone, emphasis) belong in src/style_guide.py instead, which is capped.
+#
+# Migrated on 2026-10-19 from memory/voice_corrections.md,
+# memory/formatting_corrections.md and memory/terminology.md.
+
+# Marketing and storytelling language. Director review, 2026-08-19.
+banned_phrases:
+  - phrase: revolutionary
+  - phrase: revolutionize
+  - phrase: seamless
+  - phrase: seamlessly
+  - phrase: cutting-edge
+  - phrase: best-in-class
+  - phrase: game-changer
+  - phrase: game changer
+  - phrase: change the game
+  - phrase: imagine you
+  - phrase: imagine this
+  - phrase: in the fast-paced world
+  - phrase: in the world of
+  - phrase: making life easier
+  - phrase: makes life easier
+  - phrase: headache
+  - phrase: a breeze
+  - phrase: head-on
+  - phrase: unleash
+  - phrase: supercharge
+  - phrase: next-level
+  - phrase: say goodbye to
+  - phrase: look no further
+
+# Claims that are false for FlytBase. Director review, 2026-08-19.
+forbidden_claims:
+  - pattern: '(?i)\bmulti-?factor authentication\b|\bMFA\b'
+    reason: FlytBase does not support multi-factor authentication. Remove the claim.
+  - pattern: '(?i)\bSkySense\b[^.\n]{0,40}\bFlink\b'
+    reason: SkySense is a Flex app, not a Flink.
+
+# Product names. Each 'wrong' is a case-sensitive regex, replaced with 'right'
+# automatically. Only unambiguous spellings belong here.
+terminology:
+  - wrong: '\bFlytbase\b|\bFlyt Base\b|\bFLYTBASE\b|\bflytbase\b(?![./-])'
+    right: FlytBase
+  - wrong: '\bverkos\b|\bVERKOS\b'
+    right: Verkos
+  - wrong: '\bSafesky\b|\bSafe Sky\b|\bsafesky\b(?![./-])'
+    right: SafeSky
+  - wrong: '\bdock ([123])\b'
+    right: 'Dock \1'
+  - wrong: '\bDock (one|two|three)\b'
+    right: null   # flagged, not replaced: write the numeral (Dock 1, Dock 2, Dock 3)
+
+# Raw HTML that FlytDocs renders as literal text or drops. 2026-08-27.
+raw_html_tags: [img, a, strong, em, b, i, div, span, p, br, table, tr, td, th, figure, figcaption, iframe, u, center, font]
+
+# The frontmatter description is shown in cards and search results.
+description_max_chars: 150
+
+# Sentences longer than this are reported as warnings (ASD-STE100 style).
+max_sentence_words: 30

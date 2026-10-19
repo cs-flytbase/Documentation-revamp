@@ -1,7 +1,8 @@
 """Drafting agent — produces the actual documentation markdown.
 
 Split into two separate LLM calls:
-1. Release note (customer-facing value story)
+1. Release note (brief overview of what was released and how to use it,
+   rendered from fixed template fields)
 2. Doc page (operator reference) + impacted page edits
 
 This ensures each output gets the full context window for prose quality.
@@ -14,81 +15,11 @@ from pathlib import Path
 from src.agents.base import BaseAgent
 from src.config import PROJECT_ROOT
 
-RELEASE_NOTE_PROMPT = r"""You are the Drafting Agent for the FlytBase documentation pipeline.
-You are producing a RELEASE NOTE — a customer-facing value story.
-
-Purpose: Show the customer why this matters. How does it reduce their overhead?
-What pain goes away? What becomes possible that wasn't before?
-
-Structure (follow this order exactly):
-1. H1 title
-2. YouTube embed IMMEDIATELY after the H1, on its own line, followed by a blank line:
-   {% embed url="https://youtu.be/VIDEO_ID" %}
-   Use the EXACT url given under YOUTUBE LINK below. This self-closing form is
-   what renders a video preview on the published page - do not add a caption
-   line or an {% endembed %} tag.
-   If YOUTUBE LINK says "None provided", OMIT the embed line entirely. Never
-   write the literal text YOUTUBE_URL, never write url="", and never invent a
-   video URL. A placeholder or empty embed renders as a broken block on the
-   live site.
-3. Opening narrative — describe the problem in concrete, real-world terms.
-   Use the PM doc's exact examples (thermal wells, maintenance sheds, etc.)
-   Keep the punchy, conversational tone from the PM doc.
-4. Feature introduction — what it is and how it solves the problem.
-   Screenshot right after this section.
-5. Why This Matters — the bigger picture of why this matters. Use exactly
-   this heading. Don't skip the "why" sections from the PM doc.
-6. Step-by-step walkthrough — bold step headers ("**Step 1: ...**") with
-   full paragraph under each. Place screenshots AFTER the step they illustrate.
-7. Constraints & requirements table
-8. Access section
-
-Voice rules:
-- Conversational, direct. Like you're explaining to a smart operator over coffee.
-- Start sections with the PROBLEM, then the solution. Never lead with the feature name.
-- Keep the PM doc's real-world examples and analogies word-for-word.
-- Use "you" and "your" — speak directly to the operator.
-- No marketing language. No "revolutionary", "seamless", "cutting-edge".
-- State limitations honestly.
-
-IMAGE PLACEMENT (CRITICAL — read carefully):
-- You receive an ASSET MAP with descriptions, keywords, and context for each image/GIF.
-- Syntax: ![descriptive alt text](assets/{filename})
-- For EACH asset in the ASSET MAP:
-  1. Read its KEYWORDS and CONTEXT
-  2. Find the paragraph in YOUR draft that discusses the same feature/workflow
-  3. Place the image IMMEDIATELY AFTER that paragraph
-- The HERO image goes right after the YouTube embed (or after the H1 title if no YouTube).
-- EVERY provided asset MUST appear in the release note. Count them. If the ASSET MAP has 5 assets, your output must have 5 ![...](assets/...) references.
-- NEVER place an image under an unrelated section. If the image shows "API key configuration", it goes under a setup/configuration section, NOT under "Flyt-Sense Alerts".
-
-FORMATTING:
-- Horizontal rules (---) between every major section.
-- Tables with all rows/columns from PM doc.
-- Bold UI elements: **Add Pointer**, **Save feedback**.
-- Navigation paths with >: **Verkos AI > Site Pointers**.
-- GitBook hints: {% hint style="info" %} ... {% endhint %}
-- Frontmatter: ---\ndescription: >-\n  Summary here.\n---
-- The frontmatter description MUST be under 150 characters. One short sentence only.
-
-CRITICAL REQUIREMENTS:
-1. EVERY section from the PM document must appear in the release note.
-2. EVERY asset must be embedded.
-3. YouTube link MUST be the FIRST thing after the H1 title.
-4. Release note must be 3000+ characters.
-5. Do NOT genericize. Use the PM doc's exact examples word-for-word.
-6. Do NOT invent, assume, or hallucinate ANY details not in the PM doc.
-   If the PM doc doesn't mention a number, constraint, or capability, do NOT make one up.
-
-YOUR OUTPUT MUST BE A JSON OBJECT:
-{
-  "filename": "feature-slug.md",
-  "frontmatter": "---\ndescription: >-\n  ...\n---",
-  "content": "full markdown content"
-}
-
-Return ONLY valid JSON. No markdown wrapping.
-"""
+# The release note is built from fields by code (src/release_template.py), so
+# its structure cannot drift; the prompt only asks for the fields.
+from src.release_template import RELEASE_NOTE_PROMPT, check_fields, render as render_release  # noqa: E402
+from src.style_check import autofix, errors as style_errors, lint  # noqa: E402
+from src.style_guide import feedback_block, style_block  # noqa: E402
 
 DOC_PAGE_PROMPT = r"""You are the Drafting Agent for the FlytBase documentation pipeline.
 You are producing a DOC PAGE — a comprehensive operator reference document.
@@ -326,18 +257,45 @@ class DraftingAgent(BaseAgent):
         path = PROJECT_ROOT / "CLAUDE.md"
         return path.read_text() if path.exists() else ""
 
-    def _load_relevant_memory(self) -> str:
-        memory_dir = PROJECT_ROOT / "memory"
-        contents = []
+    def _docs_conventions(self) -> str:
+        """CLAUDE.md conventions for doc pages.
 
-        for correction_file in ["voice_corrections.md", "placement_corrections.md", "formatting_corrections.md", "terminology.md"]:
-            path = memory_dir / correction_file
-            if path.exists():
-                text = path.read_text().strip()
-                if "No corrections yet" not in text:
-                    contents.append(f"--- {correction_file} ---\n{text}")
+        Its release-notes section ("storytelling", question subheadings)
+        contradicts the release template and the director's style review, so
+        it is cut. Release notes follow src/release_template.py instead.
+        """
+        text = self._load_claude_md()
+        text = re.sub(r"### Release Notes.*?(?=\n### |\n## )", "", text, flags=re.S)
+        text = re.sub(r"### Frontmatter Template \(release notes\).*?(?=\n### |\n## |\n---|\Z)", "", text, flags=re.S)
+        return text[:4000]
 
-        return "\n\n".join(contents) if contents else "No relevant memory files."
+    def _rules_for(self, kind: str) -> str:
+        """Style guide plus capped recent feedback. kind is "release" or "doc"."""
+        parts = [style_block(kind)]
+        feedback = feedback_block(PROJECT_ROOT / "memory")
+        if feedback:
+            parts.append(feedback)
+        if kind == "doc":
+            parts.append(f"--- CONVENTIONS (CLAUDE.md, doc pages) ---\n{self._docs_conventions()}\n--- END CONVENTIONS ---")
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _h1(content: str) -> str:
+        m = re.search(r"^#\s+(.+)$", content or "", re.M)
+        return m.group(1).strip() if m else ""
+
+    def _style_pass(self, kind: str, result: dict) -> tuple[dict, list]:
+        """Apply safe automatic fixes, then lint. Returns (result, issues)."""
+        if not result or not result.get("content"):
+            return result, []
+        content, _ = autofix(result["content"])
+        frontmatter = result.get("frontmatter", "")
+        if frontmatter:
+            body = re.sub(r"^---\n|\n---\s*$", "", frontmatter.strip())
+            fixed_body, _ = autofix(body)
+            frontmatter = f"---\n{fixed_body}\n---"
+        result = {**result, "content": content, "frontmatter": frontmatter}
+        return result, lint(f"{frontmatter}\n\n{content}" if frontmatter else content, kind)
 
     def _build_asset_map(self, pm_doc: str, asset_filenames: list[str], vision_output: list[dict]) -> str:
         """Build content-aware asset map for the drafting agent.
@@ -385,8 +343,6 @@ class DraftingAgent(BaseAgent):
                        asset_filenames: list[str], youtube_link: str, release_month: str,
                        transcript: str, exemplar: str = "") -> str:
         """Build the shared context block used by both calls."""
-        memory_context = self._load_relevant_memory()
-        claude_md = self._load_claude_md()
         asset_map = self._build_asset_map(pm_doc, asset_filenames, vision_output)
 
         # Trim research output to essentials
@@ -427,14 +383,6 @@ Use this for: procedural details, exact UI names, edge cases, tips.
 {youtube_link if youtube_link else "None provided."}
 --- END YOUTUBE ---
 
---- MEMORY FILES ---
-{memory_context}
---- END MEMORY ---
-
---- CLAUDE.MD CONVENTIONS ---
-{claude_md[:3000]}
---- END CLAUDE.MD ---
-
 Release month: {release_month or "current month"}"""
 
     def draft(
@@ -474,22 +422,24 @@ IMPORTANT:
 --- END SUBSECTION FOCUS ---"""
 
         release_result = {}
+        release_fields = {}
         doc_result = {}
 
         # ── Call 1: Release Note (skip if doc_only) ───────────────────
         if mode in ("both", "release_only"):
             self.system_prompt = RELEASE_NOTE_PROMPT
-            release_message = f"""Produce the release note from this PM document.
+            release_message = f"""Fill in the release note fields from this PM document.
 
 {context}
 
+{self._rules_for("release")}
+
 CHECKLIST before you respond:
-[ ] Release note covers ALL H2 sections from PM doc
-[ ] YouTube embed is the FIRST thing after H1
-[ ] Every asset filename appears in the release note
-[ ] Release note is 3000+ characters
-[ ] Real-world examples from PM doc are preserved word-for-word
-[ ] NO invented or assumed details — only facts from the PM doc"""
+[ ] One features entry per feature or change in the PM document, none dropped or merged
+[ ] Every ASSET MAP filename attached to exactly one feature
+[ ] Each "what" is at most 3 sentences; each how_to_use is at most 5 short steps
+[ ] good_to_know holds only blocking requirements or limits (or is empty)
+[ ] NO invented or assumed details - only facts from the PM document"""
 
             print("    [Drafting] Generating release note...")
             release_response = self.run(release_message)
@@ -509,11 +459,16 @@ CHECKLIST before you respond:
                 )
 
             try:
-                release_result = _extract_json(release_response)
+                release_fields = _extract_json(release_response)
             except json.JSONDecodeError:
                 reason = _diagnose_bad_output(release_response)
                 print(f"    [Drafting] Release note unusable: {reason}")
                 return {"error": f"Release note not generated - {reason}", "raw_response": release_response}
+
+            problems = check_fields(release_fields, asset_filenames)
+            if problems:
+                print(f"    [Drafting] Release note fields need fixing: {problems}")
+                release_fields = self._retry_release_fields(release_message, release_fields, problems)
         else:
             print("    [Drafting] Skipping release note (mode: doc_only)")
 
@@ -523,6 +478,8 @@ CHECKLIST before you respond:
             doc_message = f"""Produce the doc page and impacted page edits from this PM document.
 
 {context}
+
+{self._rules_for("doc")}
 
 CHECKLIST before you respond:
 [ ] Doc page is 6000+ characters / 1500+ words
@@ -557,6 +514,36 @@ CHECKLIST before you respond:
         else:
             print("    [Drafting] Skipping doc page (mode: release_only)")
 
+        # ── Render the release note from its fields ───────────────────
+        # After the doc page, so "Learn More" can name the page it links to.
+        asset_descriptions = {v.get("file_name", ""): v.get("description", "") for v in (vision_output or [])}
+        if release_fields:
+            doc_title = self._h1(doc_result.get("content", "")) if doc_result else ""
+            release_result = render_release(release_fields, asset_filenames, youtube_link, doc_title, asset_descriptions)
+
+        # ── Style: automatic fixes, then the checker ──────────────────
+        style_report = {}
+        release_result, release_issues = self._style_pass("release", release_result)
+        if style_errors(release_issues):
+            print(f"    [Drafting] Release note style errors: {[str(i) for i in style_errors(release_issues)]}")
+            release_fields = self._retry_release_fields(
+                release_message, release_fields, [f"style: {i.message}" for i in style_errors(release_issues)])
+            release_result = render_release(release_fields, asset_filenames, youtube_link,
+                                            self._h1(doc_result.get("content", "")) if doc_result else "", asset_descriptions)
+            release_result, release_issues = self._style_pass("release", release_result)
+        if release_issues:
+            style_report["release_note"] = [f"[{i.severity}] {i}" for i in release_issues][:15]
+
+        if doc_result:
+            fixed_doc, doc_issues = self._style_pass("doc", {k: v for k, v in doc_result.items() if k != "impacted_page_edits"})
+            if style_errors(doc_issues):
+                print(f"    [Drafting] Doc page style errors: {[str(i) for i in style_errors(doc_issues)]}")
+                fixed_doc = self._retry_doc_style(fixed_doc, style_errors(doc_issues))
+                fixed_doc, doc_issues = self._style_pass("doc", fixed_doc)
+            doc_result = {**fixed_doc, "impacted_page_edits": doc_result.get("impacted_page_edits", [])}
+            if doc_issues:
+                style_report["doc_page"] = [f"[{i.severity}] {i}" for i in doc_issues][:15]
+
         # ── Combine results ────────────────────────────────────────────
         combined = {
             "release_note": release_result,
@@ -571,35 +558,60 @@ CHECKLIST before you respond:
             if critical_warnings:
                 print(f"    [Drafting] Auto-retrying due to: {critical_warnings}")
                 combined = self._auto_retry(combined, critical_warnings, context, asset_filenames, youtube_link, pm_doc)
+                # A retried doc page has not been through the style pass yet.
+                if combined.get("doc_page"):
+                    combined["doc_page"], doc_issues = self._style_pass("doc", combined["doc_page"])
+                    if doc_issues:
+                        style_report["doc_page"] = [f"[{i.severity}] {i}" for i in doc_issues][:15]
+                    else:
+                        style_report.pop("doc_page", None)
                 # Re-validate after retry
                 warnings = self._validate_output(combined, asset_filenames, youtube_link, pm_doc, mode)
 
             if warnings:
                 combined["_validation_warnings"] = warnings
 
+        if style_report:
+            combined["_style_report"] = style_report
         return combined
+
+    def _retry_release_fields(self, release_message: str, fields: dict, problems: list[str]) -> dict:
+        """One targeted retry of the release note fields. Keeps the old fields if it fails."""
+        self.system_prompt = RELEASE_NOTE_PROMPT
+        response = self.run(
+            release_message
+            + "\n\nYour previous answer was:\n" + json.dumps(fields, ensure_ascii=False)
+            + "\n\nFix ONLY these problems and return the complete JSON object again:\n- "
+            + "\n- ".join(problems)
+        )
+        try:
+            return _extract_json(response)
+        except json.JSONDecodeError:
+            return fields
+
+    def _retry_doc_style(self, doc: dict, issues: list) -> dict:
+        """One targeted retry fixing style errors in the doc page. Keeps the old page if it fails."""
+        self.system_prompt = DOC_PAGE_PROMPT
+        response = self.run(
+            "Here is a doc page as JSON. Fix ONLY the problems listed below. Keep every other "
+            "word, heading, image and link exactly as it is. Return the same JSON shape "
+            '({"filename", "frontmatter", "content", "target_path"} plus any other keys it had).\n\n'
+            "PROBLEMS:\n- " + "\n- ".join(str(i) for i in issues)
+            + "\n\nDOC PAGE JSON:\n" + json.dumps(doc, ensure_ascii=False)
+        )
+        try:
+            fixed = _extract_json(response)
+            return {**doc, **{k: v for k, v in fixed.items() if k in ("content", "frontmatter")}} if fixed.get("content") else doc
+        except json.JSONDecodeError:
+            return doc
 
     def _auto_retry(self, current_result: dict, issues: list[str], context: str,
                     asset_filenames: list[str], youtube_link: str, pm_doc: str) -> dict:
         """Retry the specific output that has issues."""
-        release_issues = [w for w in issues if "release note" in w.lower()]
         doc_issues = [w for w in issues if "doc page" in w.lower()]
 
-        if release_issues:
-            self.system_prompt = RELEASE_NOTE_PROMPT
-            retry_msg = f"""Your previous release note had these problems:
-{chr(10).join('- ' + w for w in release_issues)}
-
-Fix ALL of these issues. Here is the context again:
-{context}
-
-Return the corrected release note as JSON."""
-            response = self.run(retry_msg)
-            try:
-                current_result["release_note"] = _extract_json(response)
-            except json.JSONDecodeError:
-                pass
-
+        # Release notes are retried field by field in draft(); the template makes
+        # the old whole-note retry unnecessary, so only the doc page is retried here.
         if doc_issues:
             self.system_prompt = DOC_PAGE_PROMPT
             retry_msg = f"""Your previous doc page had these problems:
@@ -628,7 +640,9 @@ Return the corrected doc page as JSON (include impacted_page_edits)."""
         # A placeholder or empty embed renders as a broken block on the live
         # site. Two published release notes already carry one of these, written
         # when no youtube_link reached the drafting agent.
-        for label, content in (("release note", release_content), ("doc page", doc_content)):
+        # The release note is rendered from fields by code, so its embed, assets
+        # and structure are guaranteed there; these checks cover the doc page.
+        for label, content in (("doc page", doc_content),):
             if not content:
                 continue
             if 'url="YOUTUBE_URL"' in content or "url='YOUTUBE_URL'" in content:
@@ -649,16 +663,10 @@ Return the corrected doc page as JSON (include impacted_page_edits)."""
         for filename in asset_filenames:
             # Check for proper image markdown syntax, not just raw filename
             img_ref = f"](assets/{filename})"
-            if release_content and img_ref not in release_content:
-                warnings.append(f"Asset '{filename}' missing from release note (must use ![alt](assets/{filename}) format)")
             if doc_content and img_ref not in doc_content:
                 warnings.append(f"Asset '{filename}' missing from doc page (must use ![alt](assets/{filename}) format)")
 
-        wants_release = mode in ("both", "release_only")
         wants_doc = mode in ("both", "doc_only")
-
-        if wants_release and youtube_link and youtube_link not in release_content:
-            warnings.append("YouTube link not in release note")
 
         # The doc page prompt had no video rule, so a requested video came out
         # as a plain link above the Overview. Require the real embed.
@@ -668,16 +676,9 @@ Return the corrected doc page as JSON (include impacted_page_edits)."""
                 "on its own line at the end of the Overview, not a plain link)"
             )
 
-        if wants_release and youtube_link and youtube_link in release_content:
-            yt_pos = release_content.index(youtube_link)
-            if yt_pos > 500:
-                warnings.append(f"YouTube link placed too far down in release note (position {yt_pos})")
-
-        # Only hold the outputs this mode asked for to a length bar. An empty
-        # release note in doc_only mode is correct, and flagging it triggered a
-        # retry that drafted a release note nobody requested.
-        if mode in ("both", "release_only") and len(release_content) < 3000:
-            warnings.append(f"Release note too short ({len(release_content)} chars, need 3000+)")
+        # The doc page has a minimum because it is the full reference. The
+        # release note has no length limit either way: it is brief by
+        # template, and a release with many features is allowed to be long.
         if mode in ("both", "doc_only") and len(doc_content) < 4000:
             warnings.append(f"Doc page too short ({len(doc_content)} chars, need 4000+)")
 

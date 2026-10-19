@@ -16,6 +16,7 @@ import requests
 
 from src.config import GITHUB_TOKEN
 from src.diag import report_exception
+from src.release_template import docs_url, finalize_doc_link
 from src.summary_placement import (
     insert_entries, insert_entry, relative_to_summary, repo_path_for, resolve_section,
 )
@@ -382,6 +383,31 @@ class GitHubPublisher:
                 return placement, text, sha
         return None, text, sha
 
+    def _planned_doc_path(self, target_section: str, doc_page: dict, parent_slug: str = "", child_slug: str = "") -> str | None:
+        """Where the docs side will put this doc page, using the same placement
+        rules, so a release note can link to it before the docs PR exists."""
+        if not doc_page or not doc_page.get("content"):
+            return None
+        guessed = _sanitize_target_path(doc_page.get("target_path", ""))
+        placement, _, _ = self._resolve_placement(DOCS_REPO, BASE_BRANCH, target_section, guessed, {})
+        if parent_slug:
+            folder = (repo_path_for(placement.folder, parent_slug, self.scope.summary_path) if placement
+                      else "/".join(p for p in (self.scope.rooted(guessed), parent_slug) if p))
+            return f"{folder}/{child_slug}.md"
+        filename = Path(doc_page.get("filename", "doc.md")).name
+        if placement:
+            return repo_path_for(placement.folder, filename, self.scope.summary_path)
+        scoped = self.scope.rooted(guessed)
+        return f"{scoped}/{filename}" if scoped else filename
+
+    @staticmethod
+    def _style_block(draft_result: dict, key: str) -> str:
+        """Style checker findings that survived the automatic fixes, for the PR."""
+        items = (draft_result.get("_style_report") or {}).get(key) or []
+        if not items:
+            return ""
+        return "### Style check\n\nCheck these before merging:\n\n" + "\n".join(f"- {i}" for i in items) + "\n\n---\n\n"
+
     def _update_summary(self, repo: str, branch: str, section_title: str,
                         file_path: str, page_title: str) -> None:
         """Add a new page entry to SUMMARY.md under the matching section.
@@ -661,7 +687,12 @@ class GitHubPublisher:
                         child_rn = child_draft.get("release_note", {})
                         if not child_rn:
                             continue
-                        child_content = child_rn.get("frontmatter", "") + "\n\n" + child_rn.get("content", "")
+                        child_doc = child_draft.get("doc_page") or {}
+                        first_doc = (subsections["children"][0]["draft"].get("doc_page") or {}) if subsections["children"] else {}
+                        child_doc_path = (self._planned_doc_path(target_section, {**child_doc, "target_path": first_doc.get("target_path", "")}, parent_slug, child_slug)
+                                          if mode in ("both", "doc_only") and child_doc else None)
+                        child_body = finalize_doc_link(child_rn.get("content", ""), docs_url(child_doc_path) if child_doc_path else None)
+                        child_content = child_rn.get("frontmatter", "") + "\n\n" + child_body
                         child_path = f"{folder_path}/{child_slug}.md"
                         self._write_file(
                             RELEASES_REPO, child_path, child_content, branch,
@@ -674,8 +705,8 @@ class GitHubPublisher:
                     section_title = release_month.replace("-", " ").upper()
                     self._update_summary_nested(
                         RELEASES_REPO, branch, section_title,
-                        f"{folder_path}/README.md", parent_title,
-                        summary_children,
+                        relative_to_summary(f"{folder_path}/README.md", self.scope.summary_path), parent_title,
+                        [{**c, "path": relative_to_summary(c["path"], self.scope.summary_path)} for c in summary_children],
                     )
 
                     # Upload assets to shared folder
@@ -701,14 +732,16 @@ class GitHubPublisher:
                 elif release_note:
                     # ── Standard single-file mode ──
                     filename = Path(release_note.get("filename", "release.md")).name
-                    full_content = release_note.get("frontmatter", "") + "\n\n" + release_note.get("content", "")
+                    doc_path = self._planned_doc_path(target_section, draft_result.get("doc_page") or {}) if mode in ("both", "doc_only") else None
+                    release_body = finalize_doc_link(release_note.get("content", ""), docs_url(doc_path) if doc_path else None)
+                    full_content = release_note.get("frontmatter", "") + "\n\n" + release_body
                     file_path = f"{self.scope.rooted(release_month)}/{filename}"
                     self._write_file(RELEASES_REPO, file_path, full_content, branch, f"docs: add {feature_slug} release note")
 
                     slug_title = feature_slug.replace("-", " ").title()
                     feature_title = self._extract_title(release_note.get("content", ""), slug_title)
                     section_title = release_month.replace("-", " ").upper()
-                    self._update_summary(RELEASES_REPO, branch, section_title, file_path, feature_title)
+                    self._update_summary(RELEASES_REPO, branch, section_title, relative_to_summary(file_path, self.scope.summary_path), feature_title)
 
                     for asset_path in bundle_asset_paths:
                         cached = self._asset_cache.get(asset_path)
@@ -737,7 +770,7 @@ class GitHubPublisher:
                 if not subsections:
                     slug_title = feature_slug.replace("-", " ").title()
                     rn_title = self._extract_title(release_note.get("content", ""), slug_title)
-                    pr_body = self._build_pr_body(rn_title, release_note, impacted_edits, "releases", requester_name, requester_username, slack_channel, slack_thread_ts)
+                    pr_body = self._style_block(draft_result, "release_note") + self._build_pr_body(rn_title, release_note, impacted_edits, "releases", requester_name, requester_username, slack_channel, slack_thread_ts)
                     results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {rn_title}", pr_body)
             except Exception as e:
                 results["errors"].append(report_exception("Releases repo failed", e))
@@ -909,7 +942,7 @@ class GitHubPublisher:
                 if not subsections:
                     slug_title = feature_slug.replace("-", " ").title()
                     dp_title = self._extract_title(doc_page.get("content", ""), slug_title)
-                    pr_body = self._placement_block(results) + self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username, slack_channel, slack_thread_ts)
+                    pr_body = self._placement_block(results) + self._style_block(draft_result, "doc_page") + self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username, slack_channel, slack_thread_ts)
                     results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {dp_title}", pr_body)
             except Exception as e:
                 results["errors"].append(report_exception("Docs repo failed", e))
