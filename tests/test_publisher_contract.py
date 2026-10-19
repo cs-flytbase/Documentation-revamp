@@ -95,7 +95,8 @@ def test_workflow_forwards_doc_scope():
         "the workflow drops doc_scope from the dispatch - every on-premise run "
         "would silently publish to the cloud docs"
     )
-    assert "doc_scope=doc_scope" in WORKFLOW, "workflow reads doc_scope but never passes it on"
+    run = (ROOT / "src/slack_run.py").read_text()
+    assert 'doc_scope=env.get("PL_DOC_SCOPE", "")' in run, "the run reads doc_scope but never passes it on"
 
 
 def test_orchestrator_forwards_doc_scope_to_publish():

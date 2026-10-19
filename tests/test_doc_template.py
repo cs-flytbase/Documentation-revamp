@@ -94,3 +94,9 @@ def test_master_page():
                       navigation="**Cockpit**")
     assert re.findall(r"^#{1,2} .+$", c, re.M) == ["# Cockpit 3.0", "## Overview", "## What's in This Section", "## Navigation"]
     assert "- [Zone Overlays](zone-overlays.md): Zones on the video." in c
+
+
+def test_task_headings_are_title_case_without_touching_labels():
+    from src.doc_template import title_case
+    assert title_case("send the drone to a point on the video") == "Send the Drone to a Point on the Video"
+    assert title_case("turn on Zone overlays in the NFZ panel") == "Turn on Zone Overlays in the NFZ Panel"

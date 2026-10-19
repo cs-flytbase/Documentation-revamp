@@ -125,6 +125,25 @@ def _items(value) -> list[str]:
     return out
 
 
+_SMALL = {"a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "into", "of", "off", "on", "onto",
+          "or", "over", "the", "to", "up", "via", "vs", "with"}
+
+
+def title_case(text: str) -> str:
+    """Title Case for headings, leaving words that already have capitals (labels,
+    acronyms, product names) exactly as written."""
+    words = _clean(text).split()
+    out = []
+    for i, w in enumerate(words):
+        if any(c.isupper() for c in w) or not w[:1].isalpha():
+            out.append(w)
+        elif i > 0 and w.lower() in _SMALL:
+            out.append(w.lower())
+        else:
+            out.append(w[:1].upper() + w[1:])
+    return " ".join(out)
+
+
 def _alt(text, file):
     alt = " ".join(str(text or Path(file).stem.replace("-", " ").replace("_", " ")).split())
     return alt.replace("[", "(").replace("]", ")")
@@ -275,7 +294,7 @@ def render(data: dict, doc_assets: list[str], youtube_link: str = "",
         out += [GAP, ""]
         gaps.append("How To")
     for t in tasks:
-        out += [f"### {_clean(t.get('task'))}", ""]
+        out += [f"### {title_case(t.get('task'))}", ""]
         n = 0
         for step in t.get("steps") or []:
             text = _clean(step.get("text") if isinstance(step, dict) else step)

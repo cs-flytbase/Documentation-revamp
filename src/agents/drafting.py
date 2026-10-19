@@ -273,6 +273,12 @@ class DraftingAgent(BaseAgent):
         descs = {v.get("file_name", ""): v.get("description", "") for v in (vision_output or [])}
         doc_assets, rel_required, rel_optional = route_assets(asset_filenames, asset_audience)
         context = self._build_context(pm_doc, research_output, transcript, exemplar)
+        # Videos are read frame by frame but never embedded; what they show is
+        # source material for both outputs.
+        videos = {k: v for k, v in descs.items() if k and k not in asset_filenames and v}
+        if videos:
+            context += "\n\n--- WHAT THE SOURCE VIDEOS SHOW (source material, not embeddable) ---\n" + "\n".join(
+                f"- {k}: {v}" for k, v in videos.items()) + "\n--- END ---"
         if subsection_focus:
             context += f"""
 

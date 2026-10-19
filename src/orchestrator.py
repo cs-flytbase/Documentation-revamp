@@ -94,6 +94,7 @@ def validate_input_bundle(bundle_path: str) -> dict:
         "youtube_link": "",
         "transcript": "",
         "asset_paths": [],
+        "video_paths": [],
         "asset_filenames": [],
         "errors": [],
         "warnings": [],
@@ -149,14 +150,20 @@ def validate_input_bundle(bundle_path: str) -> dict:
     # Find assets — support images, GIFs, and videos
     asset_dir = path / "assets"
     search_dir = asset_dir if asset_dir.exists() else path
-    for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.mp4"):
+    for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"):
         result["asset_paths"].extend([str(p) for p in search_dir.glob(ext)])
+    # Videos are source material: the vision agent reads them frame by frame,
+    # but they are never embedded (a Markdown image of an MP4 renders broken).
+    result["video_paths"] = sorted(
+        (str(p) for ext in ("*.mp4", "*.mov", "*.webm", "*.m4v") for p in search_dir.glob(ext)),
+        key=lambda p: Path(p).name,
+    )
 
     # Sort alphabetically for deterministic ordering
     result["asset_paths"].sort(key=lambda p: Path(p).name)
     result["asset_filenames"] = [Path(p).name for p in result["asset_paths"]]
 
-    if not result["asset_paths"]:
+    if not result["asset_paths"] and not result["video_paths"]:
         result["warnings"].append("No image/GIF/video assets found")
 
     return result
@@ -224,7 +231,7 @@ def fetch_exemplar(research_result: dict, doc_scope=CLOUD) -> str:
         return ""
 
 
-def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "", asset_audience: dict | None = None, feature_flag: str = "") -> dict:
+def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "", asset_audience: dict | None = None, feature_flag: str = "", on_stage=None) -> dict:
     """Run the full documentation generation pipeline.
 
     doc_scope ("cloud" or "onprem") selects the documentation set. It arrives
@@ -234,8 +241,16 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     asset_audience maps an asset filename to "release", "doc" or "both", as
     agreed with the requester in Slack. feature_flag is set only when the
     requester said the feature is behind one; it is what adds an Access section
-    to the release note.
+    to the release note. on_stage(name) is called as each stage starts, so the
+    Slack run can show live progress.
     """
+    def _stage(name: str) -> None:
+        if on_stage:
+            try:
+                on_stage(name)
+            except Exception as e:  # progress reporting must never break a run
+                print(f"  (progress update failed: {e})")
+
     # A subsections block with no children is not a subsections request. Some
     # models fill the optional tool field with an empty skeleton; treating it as
     # real drafted only a blank parent page and crashed the publisher on
@@ -271,6 +286,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     ia_summary = load_ia_summary(doc_scope=scope)
 
     # Step 3: Research + Vision in parallel
+    _stage("analysis")
     print("\n[Step 3] Running Research and Vision agents in parallel...")
 
     research_result = None
@@ -282,12 +298,13 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
         research_agent = ResearchAgent(doc_scope=scope)
         futures[executor.submit(research_agent.research, pm_doc, ia_summary)] = "research"
 
-        if bundle["asset_paths"]:
+        if bundle["asset_paths"] or bundle.get("video_paths"):
             vision_agent = VisionAgent()
-            # Pass FULL pm_doc — not truncated
+            # Pass FULL pm_doc — not truncated. Videos are described too, so
+            # what they show reaches the drafts even though they are not embedded.
             futures[executor.submit(
                 vision_agent.describe_all_assets,
-                bundle["asset_paths"],
+                bundle["asset_paths"] + bundle.get("video_paths", []),
                 pm_doc,
             )] = "vision"
 
@@ -327,6 +344,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
 
     if subsections:
         # ── Subsections mode: draft parent overview + one release note per child ──
+        _stage("drafting")
         print(f"\n[Step 4] Running Drafting agent (SUBSECTIONS mode: {len(subsections['children'])} children)...")
         print(f"  Parent: {subsections['parent_title']}")
         for child in subsections["children"]:
@@ -408,6 +426,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
 
     else:
         # ── Standard single-page mode ──
+        _stage("drafting")
         print("\n[Step 4] Running Drafting agent (two separate calls)...")
         print(f"  Passing: full source doc ({len(pm_doc)} chars), {len(vision_result)} vision descriptions,")
         print(f"           {len(bundle['asset_filenames'])} asset filenames, YouTube: {'Yes' if bundle['youtube_link'] else 'No'}, Transcript: {'Yes' if bundle['transcript'] else 'No'}")
@@ -449,6 +468,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
         print(f"    Impacted page edits: {len(draft_result.get('impacted_page_edits', []))}")
 
     # Step 5: Verification — fact-check against sources
+    _stage("checks")
     print("\n[Step 5] Running Verification agent...")
     verifier = VerificationAgent()
 
@@ -559,6 +579,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     if not GITHUB_TOKEN:
         print("\n[Step 7] Skipping GitHub publish (GITHUB_TOKEN not set)")
     else:
+        _stage("publish")
         print("\n[Step 7] Publishing to GitHub...")
         if not verified:
             print(f"  ⚠ Verification flagged {len(critical_issues)} critical issues — included in PR for reviewer")
