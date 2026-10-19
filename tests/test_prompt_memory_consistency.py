@@ -33,10 +33,14 @@ def test_prompt_does_not_use_banned_slash_heading():
     assert "generalizes / why" not in DRAFTING.lower()
 
 
-def test_prompt_uses_the_approved_heading():
-    assert "Why This Matters" in DRAFTING, (
-        "Section 5 should use the heading memory mandates."
-    )
+def test_release_note_has_no_length_floor_or_storytelling():
+    """Release notes are brief by template (2026-10-19). The old prompt demanded
+    3000+ characters, every PM section and a problem-first story, which made
+    them as long as doc pages; the director asked for plain technical English."""
+    from src.release_template import RELEASE_NOTE_PROMPT
+    p = RELEASE_NOTE_PROMPT.lower()
+    assert "3000" not in p and "storytell" not in p and "every section" not in p
+    assert "need 3000" not in DRAFTING
 
 
 def test_memory_rules_obey_the_em_dash_ban():
@@ -115,18 +119,22 @@ def test_failure_reasons_reach_slack():
     assert "Pipeline completed but no PRs were created" not in PIPELINE
 
 
-def test_prompt_specifies_the_real_embed_convention():
-    """The published convention is the self-closing form on its own line."""
-    d = DRAFTING
-    assert '{% embed url="https://youtu.be/VIDEO_ID" %}' in d
-    assert "do not add a caption" in d
+def test_release_embed_is_the_real_convention():
+    """The published convention is the self-closing form on its own line, right
+    after the H1. The release template now writes it, so it cannot drift."""
+    from src.release_template import render
+    out = render({"title": "T", "description": "d", "summary": "s", "features": [{"name": "F", "what": "w"}]},
+                 [], youtube_link="https://youtu.be/abc")["content"]
+    assert out.splitlines()[:3] == ["# T", "", '{% embed url="https://youtu.be/abc" %}']
 
 
-def test_prompt_forbids_placeholder_and_empty_embeds():
-    """Two live release notes carry a literal YOUTUBE_URL / empty embed."""
-    d = DRAFTING
-    assert "Never\n   write the literal text YOUTUBE_URL" in d or "never write url=" in d
-    assert "OMIT the embed line entirely" in d
+def test_no_video_means_no_embed():
+    """Two live release notes carry a literal YOUTUBE_URL / empty embed. With no
+    video the template writes no embed at all, and the model never writes one."""
+    from src.release_template import RELEASE_NOTE_PROMPT, render
+    out = render({"title": "T", "description": "d", "summary": "s", "features": [{"name": "F", "what": "w"}]}, [])["content"]
+    assert "{% embed" not in out and "YOUTUBE_URL" not in out
+    assert "No tables, headings, horizontal rules, hint blocks or video embeds inside any" in RELEASE_NOTE_PROMPT
 
 
 def test_validation_catches_broken_embeds():

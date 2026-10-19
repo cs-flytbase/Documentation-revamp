@@ -31,9 +31,11 @@ def test_release_only_does_not_require_a_doc_page():
     assert not _too_short(warnings, "Release note")
 
 
-def test_both_still_flags_short_outputs():
+def test_both_flags_a_short_doc_page_but_never_a_short_release_note():
+    """The doc page is the full reference and has a floor. The release note is
+    brief by template and has no length limit in either direction."""
     warnings = _validate("both", release="short", doc="short")
-    assert _too_short(warnings, "Release note")
+    assert not _too_short(warnings, "Release note")
     assert _too_short(warnings, "Doc page")
 
 
