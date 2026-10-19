@@ -143,3 +143,36 @@ def test_modes():
     out = _draft(agent, mode="release_only")
     assert out["doc_page"] == {} and out["impacted_page_edits"] == [] and len(calls) == 1
     assert "full details" not in out["release_note"]["content"]  # no doc page, no doc link
+
+
+# ── Subsections: each page uses only its own feature's images ─────────────
+
+COCKPIT_ASSETS = ["zone-overlays.gif", "zone-overlays-01-video-overlays-panel.png",
+                  "live-annotation.gif", "live-annotation-02-toolbar-freehand-selected.png"]
+FOCUS = {"title": "Zone Overlays", "summary": "Zones on the video", "slug": "zone-overlays"}
+
+
+def _zone_doc():
+    doc = json.loads(json.dumps(DOC))
+    doc["title"] = "Zone Overlays"
+    doc["section_assets"] = {"overview": ["zone-overlays.gif"]}
+    doc["how_to"] = [{"task": "Show Zones", "steps": [
+        {"text": "**Click** **Video overlays**.", "asset": "zone-overlays-01-video-overlays-panel.png"}]}]
+    return doc
+
+
+def test_a_subsection_page_is_not_forced_to_use_other_features_images():
+    agent, calls = _agent([_zone_doc()])
+    out = agent.draft("## Zone Overlays\nZones.", {}, [], COCKPIT_ASSETS, mode="doc_only", subsection_focus=FOCUS)
+    page = out["doc_page"]["content"]
+    assert len(calls) == 1  # no retry demanding the Live Annotation images
+    assert "live-annotation" not in page  # nothing dumped at the end of How To
+    assert page.count("](assets/zone-overlays") == 2
+    assert "Use ONLY the ones that show this subsection" in calls[0]["message"]
+
+
+def test_a_single_page_must_still_use_every_image():
+    agent, calls = _agent([_zone_doc(), _zone_doc()])
+    out = agent.draft("## Zone Overlays\nZones.", {}, [], COCKPIT_ASSETS, mode="doc_only")
+    assert len(calls) == 2 and "asset 'live-annotation.gif' missing from doc page" in calls[1]["message"]
+    assert out["doc_page"]["content"].count("](assets/live-annotation.gif)") == 1  # placed, never dropped
