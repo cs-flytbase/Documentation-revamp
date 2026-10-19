@@ -4,9 +4,9 @@ Two separate model calls, one per output, because the two are different
 documents with different readers (senior review, 2026-10-19):
 1. Release note: a short marketable note (problem, what it is, why it
    matters, who it is for, takeaways). No steps. src/release_template.py
-2. Doc page: the exhaustive technical reference (problem, use cases,
-   prerequisites, navigation, every control, how-to, rules, behaviour,
-   limitations, edge cases). src/doc_template.py
+2. Doc page: the technical reference, concise and capped (problem, use
+   cases, prerequisites, navigation, main controls, how-to, key rules,
+   limitations, troubleshooting). src/doc_template.py
 
 In both, the model only fills in fields. Code renders the page in a fixed
 template, checks the fields, retries once with the exact problems, applies
@@ -18,7 +18,7 @@ import re
 
 from src.agents.base import BaseAgent
 from src.config import PROJECT_ROOT
-from src.doc_template import DOC_PAGE_PROMPT, check_fields as check_doc_fields, interface_gaps, render as render_doc
+from src.doc_template import DOC_PAGE_PROMPT, check_fields as check_doc_fields, render as render_doc
 from src.release_template import RELEASE_NOTE_PROMPT, check_fields as check_release_fields, render as render_release
 from src.style_check import autofix, errors as style_errors, lint
 from src.style_guide import feedback_block, style_block
@@ -357,10 +357,6 @@ Use only the assets relevant to this scope.
                 doc_result, issues = self._style_pass("doc", doc_result)
             if issues:
                 style_report["doc_page"] = [f"[{i.severity}] {i}" for i in issues][:15]
-            unresolved = [f'step uses "{l}" but the Interface Reference does not define it'
-                          for l in interface_gaps(doc_fields)]
-            if unresolved:
-                style_report.setdefault("doc_page", []).extend(f"[warn] {u}" for u in unresolved[:10])
 
         if release_fields:
             doc_title = self._h1(doc_result.get("content", "")) if doc_result else ""

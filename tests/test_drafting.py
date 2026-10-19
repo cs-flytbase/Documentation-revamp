@@ -27,7 +27,7 @@ DOC = {
     "description": "Overlays on the live video.", "overview": "Overlays draw zones on the video.",
     "problem_statement": "Zones were only on the map.",
     "navigation": ["**Video overlays**"],
-    "interface_reference": [{"element": "**Video overlays**", "location": "bottom-right", "what_it_does": "opens panel", "effect": "toggles show"}],
+    "interface_reference": [{"element": "**Video overlays**", "what_it_does": "opens panel"}],
     "how_to": [{"task": "Open Overlays", "steps": [
         {"text": "**Click** **Video overlays**.", "asset": "01-open-panel.png"},
         {"text": "**Look** at the video.", "asset": "02-zone-overlays.gif"}]}],
@@ -70,7 +70,7 @@ def test_both_outputs_from_one_source_in_their_own_templates():
 def test_doc_gaps_are_reported_not_invented():
     agent, _ = _agent([RELEASE, DOC])
     gaps = _draft(agent)["_doc_gaps"]
-    assert "Edge Cases and Troubleshooting" in gaps and "Prerequisites" in gaps
+    assert "Troubleshooting" in gaps and "Prerequisites" in gaps
 
 
 def test_each_output_gets_its_own_prompt_and_rules():

@@ -1,10 +1,16 @@
 """The documentation template, enforced by code.
 
-A doc page is the exhaustive technical reference: problem, use cases,
-prerequisites and dependencies, navigation, every control on the screen,
-how to do each task, the rules and expected behaviour, limitations, edge
-cases, what happens afterwards. It is read by people and very often by
-LLMs, so every section must stand on its own. (Senior review, 2026-10-19.)
+A doc page is the technical reference: problem, use cases, prerequisites
+and dependencies, navigation, the main controls, how to do each task, the
+key rules, limitations and troubleshooting, what happens afterwards. It is
+read by people and very often by LLMs, so every section must stand on its
+own. (Senior review, 2026-10-19.)
+
+Concise, not exhaustive (review of the first Cockpit 3.0 page, 2026-10-19):
+the page listed 60 interface rows and 80 rules, most of them repeating the
+steps. So the reference sections have hard caps, enforced here: the model
+is told to pick what matters, check_fields sends it back if it overshoots,
+and render() cuts anything past the cap.
 
 The model fills in fields; render() builds the page in a fixed order. A
 section the source material does not cover is never dropped silently: it
@@ -19,10 +25,10 @@ Feature (nested) page:
     ## Use Cases  (### When to Use / ### When Not to Use)
     ## Before You Start  (### Prerequisites / ### Dependencies)
     ## Navigation
-    ## Interface Reference                   table: Element | Location | What It Does | Effect
+    ## Interface Reference                   table: Control | What It Does (main controls only, max 10)
     ## How To  (### <Task>, numbered steps, images right after their step)
-    ## Behaviour and Rules  (### Rules / ### Expected Behaviour)
-    ## Limitations, Edge Cases and Troubleshooting  (### Limitations table / ### Edge Cases and Troubleshooting table)
+    ## Behaviour and Rules                   one list, max 10
+    ## Limitations, Edge Cases and Troubleshooting  (### Limitations, max 5 / ### Troubleshooting table, max 6)
     ## After You Finish
     ## Related Pages
 
@@ -34,13 +40,22 @@ from pathlib import Path
 
 GAP = "Not covered in the source material."
 
-DOC_PAGE_PROMPT = r"""You are the Drafting Agent for the FlytBase documentation pipeline.
-You are writing a DOC PAGE: the exhaustive technical reference for a feature.
+# Hard caps per page (see the module docstring).
+MAX_CONTROLS = 10
+MAX_RULES = 10
+MAX_LIMITATIONS = 5
+MAX_TROUBLESHOOTING = 6
+MAX_WORDS = 30
 
-It is NOT marketing. It is read by operators and very often by LLMs answering
-questions, so it must be complete, precise and unambiguous, and every section
-must make sense on its own. Include every detail the source gives: every
-button, every rule, every condition, every limit, every message.
+DOC_PAGE_PROMPT = r"""You are the Drafting Agent for the FlytBase documentation pipeline.
+You are writing a DOC PAGE: the technical reference for a feature.
+
+It is NOT marketing. It is read by operators and often by LLMs answering
+questions, so it must be precise and unambiguous, and every section must make
+sense on its own. It must also be SHORT ENOUGH TO READ. Do not try to capture
+every detail the source gives: pick what an operator needs to use the feature
+correctly and safely, and leave out the rest. Say each fact once, in the
+section where it belongs; never repeat in one section what another already says.
 
 You do not write Markdown or choose the structure. Fill in the fields below as
 JSON; the page is built from them by code in a fixed template. If the source
@@ -61,26 +76,31 @@ marks it as a gap for the reviewer. NEVER invent content to fill a field.
   "navigation": ["**Exact > Path > To > It**, plus every other entry point"],
   "interface_reference": [
     {"element": "**Exact on-screen label**, or a consistent descriptive name for an icon (e.g. the layers icon)",
-     "location": "Where it is on the screen", "what_it_does": "Its purpose", "effect": "What changes when it is used"}
+     "what_it_does": "One short sentence: what it does, and where it is if that is not obvious"}
   ],
   "how_to": [
     {"task": "Task name (e.g. Show or Hide No-Fly Zones)",
      "steps": [{"text": "**Action verb** the **Element**. What happens as a result.", "asset": "exact-asset-filename or empty"}]}
   ],
-  "rules": ["If <condition>, then <behaviour>. Every hard rule, default, limit, ordering and permission."],
-  "expected_behaviour": ["What the system does in normal operation: states, indicators, messages, timing."],
-  "limitations": [{"component": "Component", "details": "Limit or constraint"}],
-  "edge_cases": [{"situation": "...", "cause": "...", "what_happens": "...", "what_to_do": "..."}],
+  "rules": ["One key rule or behaviour: a default, threshold, limit or condition that changes what the operator does"],
+  "limitations": ["One thing the feature does not do, or a hard constraint"],
+  "troubleshooting": [{"problem": "What the operator sees", "fix": "What to do about it"}],
   "after_you_finish": ["What persists, what resets, follow-up actions, cleanup."],
   "related_pages": [{"title": "Page title", "url": "relative path or docs URL"}],
   "section_assets": {"overview": ["exact-asset-filename"], "navigation": [], "interface_reference": []},
   "impacted_page_edits": []
 }
 
-Field rules:
-- interface_reference must list EVERY button, toggle, icon, field, menu and
-  panel the source shows or mentions, with the exact on-screen label in bold.
-  Every element named in how_to steps must also appear here.
+Field rules (the caps are per page and are enforced; order each list by importance):
+- interface_reference: only the MAIN controls, at most {max_controls}: the toggles,
+  buttons and menus an operator actually uses. Not every option inside a menu
+  (list the menu once and name its options in the sentence), not colours,
+  symbols, status labels or indicators, not fields that only display a value.
+- rules: at most {max_rules}, one sentence each. Defaults, thresholds, limits and
+  conditions only. Do not restate a step from how_to or a row from interface_reference.
+- limitations: at most {max_limitations}, one sentence each.
+- troubleshooting: at most {max_troubleshooting} rows, the problems an operator is most likely to hit.
+- Every bullet, row and cell: at most {max_words} words.
 - how_to: one task per thing an operator does. Steps are atomic: one action per
   step, starting with the action verb in bold, followed by what happens.
 - Assets: use only filenames from DOC ASSETS. Every DOC ASSET must be used
@@ -97,9 +117,10 @@ section_heading must be the EXACT heading from the existing page. Use "append" f
 
 Return ONLY the JSON object. No markdown wrapping.
 """
+DOC_PAGE_PROMPT = (DOC_PAGE_PROMPT.replace("{max_controls}", str(MAX_CONTROLS)).replace("{max_rules}", str(MAX_RULES))
+                   .replace("{max_limitations}", str(MAX_LIMITATIONS)).replace("{max_troubleshooting}", str(MAX_TROUBLESHOOTING))
+                   .replace("{max_words}", str(MAX_WORDS)))
 
-_FIELDS_LIST = ["when_to_use", "when_not_to_use", "prerequisites", "dependencies", "navigation",
-                "rules", "expected_behaviour", "after_you_finish"]
 
 
 def _clean(text) -> str:
@@ -149,41 +170,33 @@ def _alt(text, file):
     return alt.replace("[", "(").replace("]", ")")
 
 
-_BOLD = re.compile(r"\*\*(.+?)\*\*")
-# Action verbs that start a step in bold are not interface elements.
-_VERBS = {"click", "select", "open", "turn", "toggle", "enable", "disable", "choose", "enter", "type", "drag",
-          "right-click", "double-click", "navigate", "go", "set", "pick", "press", "tap", "hover", "close",
-          "launch", "save", "cancel", "move", "check", "uncheck", "expand", "collapse", "switch", "use", "draw",
-          "zoom", "tilt", "find", "watch", "review", "wait", "upload", "download", "add", "remove", "delete",
-          "edit", "confirm", "clear", "scroll", "follow"}
+def _limitations(data: dict) -> list[str]:
+    """Limitations as sentences. Older drafts used {component, details} rows."""
+    out = []
+    for v in data.get("limitations") or []:
+        if isinstance(v, dict):
+            v = ": ".join(x for x in (_cell(v.get("component")), _cell(v.get("details"))) if x)
+        v = _cell(v)
+        if v:
+            out.append(v)
+    return out
 
 
-def _norm(s: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+def _troubleshooting(data: dict) -> list[tuple[str, str]]:
+    rows = []
+    for r in data.get("troubleshooting") or []:
+        if isinstance(r, dict) and _cell(r.get("problem")):
+            rows.append((_cell(r.get("problem")), _cell(r.get("fix"))))
+    return rows
 
 
-def interface_gaps(data: dict) -> list[str]:
-    """Bold UI labels used in how_to steps that the Interface Reference does not define."""
-    defined = " | ".join(_norm(r.get("element", "")) for r in data.get("interface_reference") or [] if isinstance(r, dict))
-    missing = []
-    for task in data.get("how_to") or []:
-        for step in (task.get("steps") or []) if isinstance(task, dict) else []:
-            text = (step.get("text", "") if isinstance(step, dict) else str(step)).strip()
-            for m in _BOLD.finditer(text):
-                label = m.group(1)
-                # The bold at the very start of a step is its action verb
-                # ("**Turn on** ..."), per the docs convention, not a control.
-                if m.start() == 0:
-                    continue
-                n = _norm(label)
-                if not n or n in _VERBS:
-                    continue
-                parts = [p.strip() for p in re.split(r">", label)]
-                for part in parts:
-                    pn = _norm(part)
-                    if pn and pn not in _VERBS and pn not in defined and pn not in missing:
-                        missing.append(pn)
-    return missing
+def _controls(data: dict) -> list[tuple[str, str]]:
+    return [(_cell(r.get("element")), _cell(r.get("what_it_does")))
+            for r in data.get("interface_reference") or [] if isinstance(r, dict) and _cell(r.get("element"))]
+
+
+def _words(text: str) -> int:
+    return len(re.sub(r"\*\*", "", text).split())
 
 
 def check_fields(data: dict, doc_assets: list[str], require_all: bool = True) -> list[str]:
@@ -198,8 +211,19 @@ def check_fields(data: dict, doc_assets: list[str], require_all: bool = True) ->
             problems.append(f'doc page field "{key}" is empty')
     if len(str(data.get("description", ""))) > 150:
         problems.append(f'doc page description is {len(str(data["description"]))} characters (max 150)')
-    for label in interface_gaps(data):
-        problems.append(f'doc page step uses "{label}" but interface_reference does not define it')
+    sizes = {
+        "interface_reference": (len(_controls(data)), MAX_CONTROLS, "main controls only"),
+        "rules": (len(_items(data.get("rules"))), MAX_RULES, "keep defaults, thresholds, limits and conditions; drop anything the steps already say"),
+        "limitations": (len(_limitations(data)), MAX_LIMITATIONS, "keep the most important"),
+        "troubleshooting": (len(_troubleshooting(data)), MAX_TROUBLESHOOTING, "keep the most likely problems"),
+    }
+    for key, (n, cap, hint) in sizes.items():
+        if n > cap:
+            problems.append(f"doc page {key} has {n} entries (max {cap}): {hint}")
+    long = [t for t in _items(data.get("rules")) + _limitations(data)
+            + [c for row in _controls(data) + _troubleshooting(data) for c in row] if _words(t) > MAX_WORDS]
+    for t in long[:5]:
+        problems.append(f'doc page entry has {_words(t)} words (max {MAX_WORDS}), shorten it: "{t[:60]}..."')
     used = []
     for task in data.get("how_to") or []:
         for step in task.get("steps") or []:
@@ -281,12 +305,10 @@ def render(data: dict, doc_assets: list[str], youtube_link: str = "",
         gaps.append("Navigation")
     out += sec_imgs("navigation")
 
-    rows = [r for r in data.get("interface_reference") or [] if isinstance(r, dict) and _cell(r.get("element"))]
+    rows = _controls(data)[:MAX_CONTROLS]
     out += ["## Interface Reference", ""]
     if rows:
-        out += ["| Element | Location | What It Does | Effect |", "|---|---|---|---|"]
-        out += [f"| {_cell(r.get('element'))} | {_cell(r.get('location'))} | {_cell(r.get('what_it_does'))} | {_cell(r.get('effect'))} |" for r in rows]
-        out += [""]
+        out += ["| Control | What It Does |", "|---|---|"] + [f"| {e} | {w} |" for e, w in rows] + [""]
     else:
         out += [GAP, ""]
         gaps.append("Interface Reference")
@@ -311,27 +333,27 @@ def render(data: dict, doc_assets: list[str], youtube_link: str = "",
                 out += img(step.get("asset"), text)
     out += sec_imgs("how_to")
 
+    rules = _items(data.get("rules"))[:MAX_RULES]
     out += ["## Behaviour and Rules", ""]
-    bullet_list("rules", "Rules", out)
-    bullet_list("expected_behaviour", "Expected Behaviour", out)
+    out += ([f"- {r}" for r in rules] + [""]) if rules else [GAP, ""]
+    if not rules:
+        gaps.append("Behaviour and Rules")
+    out += sec_imgs("rules")
 
     out += ["## Limitations, Edge Cases and Troubleshooting", ""]
-    lim = [r for r in data.get("limitations") or [] if isinstance(r, dict) and _cell(r.get("component"))]
+    lim = _limitations(data)[:MAX_LIMITATIONS]
     out += ["### Limitations", ""]
-    if lim:
-        out += ["| Component | Details |", "|---|---|"] + [f"| {_cell(r.get('component'))} | {_cell(r.get('details'))} |" for r in lim] + [""]
-    else:
-        out += [GAP, ""]
+    out += ([f"- {l}" for l in lim] + [""]) if lim else [GAP, ""]
+    if not lim:
         gaps.append("Limitations")
-    edges = [r for r in data.get("edge_cases") or [] if isinstance(r, dict) and _cell(r.get("situation"))]
-    out += ["### Edge Cases and Troubleshooting", ""]
-    if edges:
-        out += ["| Situation | Cause | What Happens | What to Do |", "|---|---|---|---|"]
-        out += [f"| {_cell(r.get('situation'))} | {_cell(r.get('cause'))} | {_cell(r.get('what_happens'))} | {_cell(r.get('what_to_do'))} |" for r in edges] + [""]
+    trouble = _troubleshooting(data)[:MAX_TROUBLESHOOTING]
+    out += ["### Troubleshooting", ""]
+    if trouble:
+        out += ["| Problem | What to Do |", "|---|---|"] + [f"| {p} | {f} |" for p, f in trouble] + [""]
     else:
         out += [GAP, ""]
-        gaps.append("Edge Cases and Troubleshooting")
-    out += sec_imgs("limitations") + sec_imgs("edge_cases")
+        gaps.append("Troubleshooting")
+    out += sec_imgs("limitations") + sec_imgs("troubleshooting")
 
     after = _items(data.get("after_you_finish"))
     out += ["## After You Finish", ""]
