@@ -29,3 +29,5 @@ Appended to by the memory updater when reviewers correct voice/tone issues.
 - [2026-08-19] [voice] Use "Why This Matters" as the standard heading for the section explaining broader impact. Do not use "How It Generalizes" or "Why It is Foundational".
 
 - [2026-10-15] [voice] After providing the resolution or outcome, stop. Do not add further explanation, repetition, or status commentary unless the user asks a follow-up question.
+
+- [2026-10-19] [voice] Use a softer, more polite tone with the requester while remaining concise and accurate; avoid rude or overly contemptuous jokes.
