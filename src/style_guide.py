@@ -53,7 +53,7 @@ DOC_PAGE_RULES = [
 TONE = {
     "release": "TONE: a marketable note. Lead with the problem and the value of the approach: what the operator "
                "gains, who it is for, what they walk away with. Confident and concrete, never hype.",
-    "doc": "TONE: a technical reference, not marketing. Neutral, exhaustive, precise. Every section must make "
+    "doc": "TONE: a technical reference, not marketing. Neutral, precise and concise: what an operator needs, said once. Every section must make "
            "sense on its own, because it is often read by an LLM answering a single question.",
 }
 

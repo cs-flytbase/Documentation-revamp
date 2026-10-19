@@ -1,8 +1,10 @@
-"""Doc template (senior review, 2026-10-19): the exhaustive technical reference,
-every section present, gaps marked instead of invented."""
+"""Doc template (senior review, 2026-10-19): the technical reference, every
+section present, gaps marked instead of invented, and short: the reference
+sections are capped so a page is readable."""
 import re
 
-from src.doc_template import GAP, check_fields, interface_gaps, render, render_master
+from src.doc_template import (GAP, MAX_CONTROLS, MAX_RULES, MAX_TROUBLESHOOTING, MAX_WORDS, check_fields,
+                              render, render_master)
 
 ASSETS = ["01-open-panel.png", "02-zone-overlays.gif"]
 
@@ -15,25 +17,24 @@ FIELDS = {
     "prerequisites": ["Zones are set up for the site."], "dependencies": ["Fast telemetry link."],
     "navigation": ["**Cockpit > Video overlays** (layers icon, bottom-right of the video)"],
     "interface_reference": [
-        {"element": "**Video overlays**", "location": "Bottom-right of the video", "what_it_does": "Opens the overlay panel", "effect": "Shows the toggles"},
-        {"element": "**Zone overlays**", "location": "Video overlays panel", "what_it_does": "Turns zone drawing on or off", "effect": "NFZs and geofence appear on the video"},
+        {"element": "**Video overlays**", "what_it_does": "Opens the overlay panel, bottom-right of the video."},
+        {"element": "**Zone overlays**", "what_it_does": "Shows or hides NFZs and the geofence on the video."},
     ],
     "how_to": [{"task": "Show Zones on the Video", "steps": [
         {"text": "**Click** **Video overlays**. The panel opens.", "asset": "01-open-panel.png"},
         {"text": "**Turn on** **Zone overlays**. Zones appear on the video.", "asset": "02-zone-overlays.gif"},
     ]}],
-    "rules": ["If Zone overlays is off, no zones are drawn."],
-    "expected_behaviour": ["NFZs are red, the geofence is green."],
-    "limitations": [{"component": "Zone types", "details": "NFZs and geofence only"}],
-    "edge_cases": [{"situation": "No zones appear", "cause": "No zones for the site", "what_happens": "Nothing is drawn", "what_to_do": "Add zones"}],
+    "rules": ["If Zone overlays is off, no zones are drawn.", "NFZs are red, the geofence is green."],
+    "limitations": ["Shows NFZs and the geofence only."],
+    "troubleshooting": [{"problem": "No zones appear", "fix": "Sync the zones to the drone."}],
     "after_you_finish": ["The toggle state is remembered."],
     "related_pages": [{"title": "Zones", "url": "../pre-flight-modules/zones.md"}],
 }
 
 ORDER = ["# Video Overlays", "## Overview", "## Problem Statement", "## Use Cases", "### When to Use", "### When Not to Use",
          "## Before You Start", "### Prerequisites", "### Dependencies", "## Navigation", "## Interface Reference",
-         "## How To", "### Show Zones on the Video", "## Behaviour and Rules", "### Rules", "### Expected Behaviour",
-         "## Limitations, Edge Cases and Troubleshooting", "### Limitations", "### Edge Cases and Troubleshooting",
+         "## How To", "### Show Zones on the Video", "## Behaviour and Rules",
+         "## Limitations, Edge Cases and Troubleshooting", "### Limitations", "### Troubleshooting",
          "## After You Finish", "## Related Pages"]
 
 
@@ -51,17 +52,23 @@ def test_images_sit_right_after_their_step():
     assert c.count("](assets/02-zone-overlays.gif)") == 1
 
 
-def test_tables_for_interface_limitations_and_edge_cases():
+def test_short_tables_and_lists():
     c = render(FIELDS, ASSETS)[0]["content"]
-    assert "| Element | Location | What It Does | Effect |" in c
-    assert "| **Zone overlays** | Video overlays panel | Turns zone drawing on or off | NFZs and geofence appear on the video |" in c
-    assert "| Component | Details |" in c and "| Situation | Cause | What Happens | What to Do |" in c
+    assert "| Control | What It Does |" in c
+    assert "| **Zone overlays** | Shows or hides NFZs and the geofence on the video. |" in c
+    assert "- Shows NFZs and the geofence only." in c
+    assert "| Problem | What to Do |\n|---|---|\n| No zones appear | Sync the zones to the drone. |" in c
+
+
+def test_old_style_limitations_still_render():
+    c = render({**FIELDS, "limitations": [{"component": "Zone types", "details": "NFZs and geofence only"}]}, ASSETS)[0]["content"]
+    assert "- Zone types: NFZs and geofence only" in c
 
 
 def test_missing_sections_are_marked_never_dropped():
-    sparse = {k: v for k, v in FIELDS.items() if k not in ("edge_cases", "dependencies", "after_you_finish", "navigation")}
+    sparse = {k: v for k, v in FIELDS.items() if k not in ("troubleshooting", "dependencies", "after_you_finish", "navigation")}
     page, gaps = render(sparse, ASSETS)
-    assert set(gaps) == {"Edge Cases and Troubleshooting", "Dependencies", "After You Finish", "Navigation"}
+    assert set(gaps) == {"Troubleshooting", "Dependencies", "After You Finish", "Navigation"}
     assert page["content"].count(GAP) == 4
     assert "## Navigation" in page["content"]
 
@@ -73,12 +80,39 @@ def test_every_doc_asset_lands_once_even_if_forgotten():
         assert c.count(f"](assets/{a})") == 1
 
 
-def test_steps_must_only_use_defined_elements():
-    undefined = {**FIELDS, "how_to": [{"task": "T", "steps": [{"text": "**Click** the **Layers** icon, then **Settings > Telemetry**."}]}]}
-    assert interface_gaps(undefined) == ["layers", "settings", "telemetry"]
-    assert interface_gaps(FIELDS) == []
-    problems = check_fields(undefined, [])
-    assert 'doc page step uses "layers" but interface_reference does not define it' in problems
+def test_reference_sections_are_capped():
+    big = {**FIELDS,
+           "interface_reference": [{"element": f"**Control {i}**", "what_it_does": "Does a thing."} for i in range(25)],
+           "rules": [f"Rule {i}." for i in range(30)],
+           "troubleshooting": [{"problem": f"P{i}", "fix": "F"} for i in range(12)]}
+    problems = "\n".join(check_fields(big, ASSETS))
+    assert f"interface_reference has 25 entries (max {MAX_CONTROLS})" in problems
+    assert f"rules has 30 entries (max {MAX_RULES})" in problems
+    assert f"troubleshooting has 12 entries (max {MAX_TROUBLESHOOTING})" in problems
+    c = render(big, ASSETS)[0]["content"]
+    assert c.count("| **Control ") == MAX_CONTROLS
+    assert c.count("\n- Rule ") == MAX_RULES
+    assert len(re.findall(r"^\| P\d+ \|", c, re.M)) == MAX_TROUBLESHOOTING
+
+
+def test_long_entries_are_sent_back():
+    wordy = {**FIELDS, "rules": [" ".join(["word"] * (MAX_WORDS + 5))]}
+    assert any(f"has {MAX_WORDS + 5} words" in p for p in check_fields(wordy, ASSETS))
+    assert check_fields(FIELDS, ASSETS) == []
+
+
+def test_step_labels_do_not_need_a_table_row():
+    # The old rule (every bold label in a step needs an Interface Reference row)
+    # is what made the table 60 rows long.
+    extra = {**FIELDS, "how_to": [{"task": "T", "steps": [{"text": "**Click** the **Layers** icon, then **Settings > Telemetry**.",
+                                                          "asset": "01-open-panel.png"}, {"text": "**Look**.", "asset": "02-zone-overlays.gif"}]}]}
+    assert check_fields(extra, ASSETS) == []
+
+
+def test_prompt_asks_for_short():
+    from src.doc_template import DOC_PAGE_PROMPT
+    assert "exhaustive" not in DOC_PAGE_PROMPT and "{max_" not in DOC_PAGE_PROMPT
+    assert f"only the MAIN controls, at most {MAX_CONTROLS}" in DOC_PAGE_PROMPT
 
 
 def test_asset_checks():
