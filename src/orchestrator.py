@@ -20,6 +20,7 @@ from src.agents.research import ResearchAgent
 from src.agents.vision import VisionAgent
 from src.agents.drafting import DraftingAgent
 from src.agents.verification import VerificationAgent
+from src.doc_template import render_master
 
 
 def _save_feature_note(draft_result: dict, research_result: dict, pm_doc: str, bundle_name: str) -> None:
@@ -93,6 +94,7 @@ def validate_input_bundle(bundle_path: str) -> dict:
         "youtube_link": "",
         "transcript": "",
         "asset_paths": [],
+        "video_paths": [],
         "asset_filenames": [],
         "errors": [],
         "warnings": [],
@@ -148,14 +150,20 @@ def validate_input_bundle(bundle_path: str) -> dict:
     # Find assets — support images, GIFs, and videos
     asset_dir = path / "assets"
     search_dir = asset_dir if asset_dir.exists() else path
-    for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.mp4"):
+    for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"):
         result["asset_paths"].extend([str(p) for p in search_dir.glob(ext)])
+    # Videos are source material: the vision agent reads them frame by frame,
+    # but they are never embedded (a Markdown image of an MP4 renders broken).
+    result["video_paths"] = sorted(
+        (str(p) for ext in ("*.mp4", "*.mov", "*.webm", "*.m4v") for p in search_dir.glob(ext)),
+        key=lambda p: Path(p).name,
+    )
 
     # Sort alphabetically for deterministic ordering
     result["asset_paths"].sort(key=lambda p: Path(p).name)
     result["asset_filenames"] = [Path(p).name for p in result["asset_paths"]]
 
-    if not result["asset_paths"]:
+    if not result["asset_paths"] and not result["video_paths"]:
         result["warnings"].append("No image/GIF/video assets found")
 
     return result
@@ -223,13 +231,26 @@ def fetch_exemplar(research_result: dict, doc_scope=CLOUD) -> str:
         return ""
 
 
-def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "") -> dict:
+def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "", asset_audience: dict | None = None, feature_flag: str = "", on_stage=None) -> dict:
     """Run the full documentation generation pipeline.
 
     doc_scope ("cloud" or "onprem") selects the documentation set. It arrives
     from the Slack button click in the dispatch payload and is never inferred
     from the request text.
+
+    asset_audience maps an asset filename to "release", "doc" or "both", as
+    agreed with the requester in Slack. feature_flag is set only when the
+    requester said the feature is behind one; it is what adds an Access section
+    to the release note. on_stage(name) is called as each stage starts, so the
+    Slack run can show live progress.
     """
+    def _stage(name: str) -> None:
+        if on_stage:
+            try:
+                on_stage(name)
+            except Exception as e:  # progress reporting must never break a run
+                print(f"  (progress update failed: {e})")
+
     # A subsections block with no children is not a subsections request. Some
     # models fill the optional tool field with an empty skeleton; treating it as
     # real drafted only a blank parent page and crashed the publisher on
@@ -265,6 +286,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     ia_summary = load_ia_summary(doc_scope=scope)
 
     # Step 3: Research + Vision in parallel
+    _stage("analysis")
     print("\n[Step 3] Running Research and Vision agents in parallel...")
 
     research_result = None
@@ -276,12 +298,13 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
         research_agent = ResearchAgent(doc_scope=scope)
         futures[executor.submit(research_agent.research, pm_doc, ia_summary)] = "research"
 
-        if bundle["asset_paths"]:
+        if bundle["asset_paths"] or bundle.get("video_paths"):
             vision_agent = VisionAgent()
-            # Pass FULL pm_doc — not truncated
+            # Pass FULL pm_doc — not truncated. Videos are described too, so
+            # what they show reaches the drafts even though they are not embedded.
             futures[executor.submit(
                 vision_agent.describe_all_assets,
-                bundle["asset_paths"],
+                bundle["asset_paths"] + bundle.get("video_paths", []),
                 pm_doc,
             )] = "vision"
 
@@ -321,6 +344,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
 
     if subsections:
         # ── Subsections mode: draft parent overview + one release note per child ──
+        _stage("drafting")
         print(f"\n[Step 4] Running Drafting agent (SUBSECTIONS mode: {len(subsections['children'])} children)...")
         print(f"  Parent: {subsections['parent_title']}")
         for child in subsections["children"]:
@@ -342,6 +366,8 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                 exemplar=exemplar,
                 mode=mode,
                 subsection_focus=child,
+                asset_audience=asset_audience,
+                feature_flag=feature_flag,
             )
             if "error" in child_draft:
                 print(f"    Child draft FAILED: {child_draft['error']}")
@@ -357,14 +383,15 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
 
         # Build parent overview page
         print(f"\n  [Drafting] Generating parent overview: {subsections['parent_title']}...")
-        child_links = "\n".join(
-            f"* [{c['title']}]({c['slug']}.md)" for c in subsections["children"]
-        )
+        # The parent is a master page: a lighter template that introduces the
+        # section and lists what is in it.
         parent_content = (
             f"---\ndescription: >-\n  {subsections['parent_summary'][:140]}\n---\n\n"
-            f"# {subsections['parent_title']}\n\n"
-            f"{subsections['parent_summary']}\n\n"
-            f"## In This Section\n\n{child_links}\n"
+            + render_master(
+                subsections["parent_title"], subsections["parent_summary"],
+                [{"title": c["title"], "path": f"{c['slug']}.md", "summary": c.get("summary", "")}
+                 for c in subsections["children"]],
+            )
         )
 
         # Package as subsections draft result for the publisher
@@ -390,12 +417,16 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
         for cr in child_results:
             ws = cr["draft"].pop("_validation_warnings", [])
             validation_warnings.extend(ws)
+            for key, items in (cr["draft"].get("_style_report") or {}).items():
+                draft_result.setdefault("_style_report", {}).setdefault(key, []).extend(f"{cr['slug']}: {i}" for i in items)
+            draft_result.setdefault("_doc_gaps", []).extend(f"{cr['slug']}: {g}" for g in cr["draft"].get("_doc_gaps", []))
 
         print(f"  Subsection drafting complete. {len(child_results)} children + 1 parent.")
         print(f"    Impacted page edits: {len(draft_result['impacted_page_edits'])}")
 
     else:
         # ── Standard single-page mode ──
+        _stage("drafting")
         print("\n[Step 4] Running Drafting agent (two separate calls)...")
         print(f"  Passing: full source doc ({len(pm_doc)} chars), {len(vision_result)} vision descriptions,")
         print(f"           {len(bundle['asset_filenames'])} asset filenames, YouTube: {'Yes' if bundle['youtube_link'] else 'No'}, Transcript: {'Yes' if bundle['transcript'] else 'No'}")
@@ -411,6 +442,8 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
             transcript=bundle["transcript"],
             exemplar=exemplar,
             mode=mode,
+            asset_audience=asset_audience,
+            feature_flag=feature_flag,
         )
 
         if "error" in draft_result:
@@ -435,6 +468,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
         print(f"    Impacted page edits: {len(draft_result.get('impacted_page_edits', []))}")
 
     # Step 5: Verification — fact-check against sources
+    _stage("checks")
     print("\n[Step 5] Running Verification agent...")
     verifier = VerificationAgent()
 
@@ -545,6 +579,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     if not GITHUB_TOKEN:
         print("\n[Step 7] Skipping GitHub publish (GITHUB_TOKEN not set)")
     else:
+        _stage("publish")
         print("\n[Step 7] Publishing to GitHub...")
         if not verified:
             print(f"  ⚠ Verification flagged {len(critical_issues)} critical issues — included in PR for reviewer")

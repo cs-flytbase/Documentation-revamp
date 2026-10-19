@@ -16,6 +16,7 @@ import requests
 
 from src.config import GITHUB_TOKEN
 from src.diag import report_exception
+from src.link_check import check_page
 from src.release_template import docs_url, finalize_doc_link
 from src.summary_placement import (
     insert_entries, insert_entry, relative_to_summary, repo_path_for, resolve_section,
@@ -59,6 +60,8 @@ class GitHubPublisher:
         if not GITHUB_TOKEN:
             raise ValueError("GITHUB_TOKEN is not set in .env")
         self.scope = doc_scope
+        self._written: dict[str, set] = {}      # repo -> paths written on this run's branch
+        self._tree_cache: dict[str, set] = {}   # repo -> paths on main
         self.session = requests.Session()
         self.session.headers.update({
             "Authorization": f"token {GITHUB_TOKEN}",
@@ -107,6 +110,7 @@ class GitHubPublisher:
         if existing_sha:
             payload["sha"] = existing_sha
         self._api("PUT", repo, f"contents/{file_path}", json=payload)
+        self._written.setdefault(repo, set()).add(file_path)
 
     def _compress_gif(self, file_path: str, target_mb: int = 20) -> bytes:
         """Compress a GIF to fit under the target size.
@@ -206,7 +210,40 @@ class GitHubPublisher:
             "sha": new_commit["sha"],
         })
 
-    def _upload_asset(self, repo: str, asset_path: str, target_path: str,
+    def _upload_asset(self, repo: str, asset_path: str, target_path: str, *args, **kwargs):
+        """Upload an asset and remember its path for the link check."""
+        err = self._upload_asset_raw(repo, asset_path, target_path, *args, **kwargs)
+        if not err:
+            self._written.setdefault(repo, set()).add(f"{target_path}/{Path(asset_path).name}")
+        return err
+
+    def _exists_fn(self, repo: str):
+        """A path check against main plus everything this run wrote."""
+        if repo not in self._tree_cache:
+            try:
+                tree = self._api("GET", repo, f"git/trees/{BASE_BRANCH}?recursive=1")
+                self._tree_cache[repo] = {t["path"] for t in tree.get("tree", []) if t.get("type") == "blob"}
+            except Exception as e:  # noqa: BLE001 - a failed check must not block publishing
+                print(f"    Link check skipped for {repo}: {e}")
+                return None
+        known = self._tree_cache[repo]
+        written = self._written.get(repo, set())
+        return lambda path: path in known or path in written
+
+    def _check_links(self, repo: str, page_path: str, content: str, results: dict, also_exists=()) -> None:
+        """Report broken links and images in a page as warnings for the PR and Slack."""
+        exists = self._exists_fn(repo)
+        if exists is None:
+            return
+        docs = self._exists_fn(DOCS_REPO) if repo != DOCS_REPO else exists
+        extra = set(also_exists)  # pages this run is about to create in the other repo
+
+        def docs_exists(path):
+            return path in extra or (docs is not None and docs(path))
+        for problem in check_page(content, page_path, exists, docs_exists):
+            results.setdefault("warnings", []).append(f"{page_path}: {problem}")
+
+    def _upload_asset_raw(self, repo: str, asset_path: str, target_path: str,
                       branch: str, feature_slug: str,
                       precompressed: bytes | None = None) -> str | None:
         """Upload an asset file to GitHub. Handles compression and fallback.
@@ -399,6 +436,29 @@ class GitHubPublisher:
             return repo_path_for(placement.folder, filename, self.scope.summary_path)
         scoped = self.scope.rooted(guessed)
         return f"{scoped}/{filename}" if scoped else filename
+
+    @staticmethod
+    def _used_assets(bundle_asset_paths: list[str], content: str) -> list[str]:
+        """Only the assets this page references. An image meant only for the doc
+        page must not be uploaded to the releases repo, and vice versa."""
+        return [p for p in bundle_asset_paths if f"](assets/{Path(p).name})" in (content or "")]
+
+    @staticmethod
+    def _subsection_text(subsections: dict, key: str) -> str:
+        parts = [subsections.get("parent_content", "")]
+        for child in subsections.get("children", []):
+            parts.append((child.get("draft", {}).get(key) or {}).get("content", ""))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _gaps_block(draft_result: dict) -> str:
+        """Doc sections the source material did not cover, for the reviewer."""
+        gaps = draft_result.get("_doc_gaps") or []
+        if not gaps:
+            return ""
+        return ("### Not covered in the source material\n\nThese sections say so on the page. "
+                "Add the information before merging, or accept the gap:\n\n"
+                + "\n".join(f"- {g}" for g in gaps) + "\n\n---\n\n")
 
     @staticmethod
     def _style_block(draft_result: dict, key: str) -> str:
@@ -653,6 +713,9 @@ class GitHubPublisher:
         branch = f"{self.scope.branch_prefix}/{feature_slug}-{int(time.time())}"
         output_path = Path(output_dir)
         results = {"docs_pr": None, "releases_pr": None, "errors": []}
+        if draft_result.get("_doc_gaps"):
+            results["doc_gaps"] = list(draft_result["_doc_gaps"])
+
         # Cache compressed GIF bytes so we don't re-compress for the second repo
         self._asset_cache: dict[str, bytes] = {}
 
@@ -681,6 +744,7 @@ class GitHubPublisher:
 
                     # Write each child
                     summary_children = []
+                    to_check = []  # checked after the assets are uploaded
                     for child_result in subsections["children"]:
                         child_slug = child_result["slug"]
                         child_draft = child_result["draft"]
@@ -700,6 +764,7 @@ class GitHubPublisher:
                         )
                         child_title = self._extract_title(child_rn.get("content", ""), child_slug.replace("-", " ").title())
                         summary_children.append({"title": child_title, "path": child_path})
+                        to_check.append((child_path, child_content, [child_doc_path] if child_doc_path else []))
 
                     # Update SUMMARY.md with nested structure
                     section_title = release_month.replace("-", " ").upper()
@@ -710,7 +775,7 @@ class GitHubPublisher:
                     )
 
                     # Upload assets to shared folder
-                    for asset_path in bundle_asset_paths:
+                    for asset_path in self._used_assets(bundle_asset_paths, self._subsection_text(subsections, "release_note")):
                         cached = self._asset_cache.get(asset_path)
                         err = self._upload_asset(RELEASES_REPO, asset_path, f"{folder_path}/assets", branch, feature_slug, precompressed=cached)
                         if err:
@@ -718,6 +783,8 @@ class GitHubPublisher:
 
                     # Build PR body for subsections
                     child_list = "\n".join(f"- `{c['path']}` — {c['title']}" for c in summary_children)
+                    for path, text, extra in to_check:
+                        self._check_links(RELEASES_REPO, path, text, results, also_exists=extra)
                     pr_body = self._build_pr_body_subsections(
                         parent_title, f"{folder_path}/README.md", summary_children,
                         impacted_edits, "releases",
@@ -743,7 +810,7 @@ class GitHubPublisher:
                     section_title = release_month.replace("-", " ").upper()
                     self._update_summary(RELEASES_REPO, branch, section_title, relative_to_summary(file_path, self.scope.summary_path), feature_title)
 
-                    for asset_path in bundle_asset_paths:
+                    for asset_path in self._used_assets(bundle_asset_paths, full_content):
                         cached = self._asset_cache.get(asset_path)
                         err = self._upload_asset(RELEASES_REPO, asset_path, f"{self.scope.rooted(release_month)}/assets", branch, feature_slug, precompressed=cached)
                         if err:
@@ -771,6 +838,9 @@ class GitHubPublisher:
                     slug_title = feature_slug.replace("-", " ").title()
                     rn_title = self._extract_title(release_note.get("content", ""), slug_title)
                     pr_body = self._style_block(draft_result, "release_note") + self._build_pr_body(rn_title, release_note, impacted_edits, "releases", requester_name, requester_username, slack_channel, slack_thread_ts)
+                    self._check_links(RELEASES_REPO, file_path, full_content, results, also_exists=[doc_path] if doc_path else [])
+                    if results.get("warnings"):
+                        pr_body = "".join(f"> ⚠️ {w}\n" for w in results["warnings"]) + "\n---\n\n" + pr_body
                     results["releases_pr"] = self._create_pr(RELEASES_REPO, branch, f"✍️ New Release Note: {rn_title}", pr_body)
             except Exception as e:
                 results["errors"].append(report_exception("Releases repo failed", e))
@@ -808,6 +878,7 @@ class GitHubPublisher:
                     )
 
                     summary_children = []
+                    to_check = []  # checked after the assets are uploaded
                     for child_result in subsections["children"]:
                         child_slug = child_result["slug"]
                         child_draft = child_result["draft"]
@@ -822,6 +893,7 @@ class GitHubPublisher:
                         )
                         child_title = self._extract_title(child_dp.get("content", ""), child_slug.replace("-", " ").title())
                         summary_children.append({"title": child_title, "path": child_path})
+                        to_check.append((child_path, child_content, []))
 
                     # An explicit target_section (what the user actually asked for)
                     # wins over the first child's IA guess. A child's own
@@ -858,18 +930,20 @@ class GitHubPublisher:
                         results["docs_section"] = parent_section or "(not added to the sidebar)"
                     results["docs_file"] = f"{folder_path}/README.md"
 
-                    for asset_path in bundle_asset_paths:
+                    for asset_path in self._used_assets(bundle_asset_paths, self._subsection_text(subsections, "doc_page")):
                         cached = self._asset_cache.get(asset_path)
                         err = self._upload_asset(DOCS_REPO, asset_path, f"{folder_path}/assets", branch, feature_slug, precompressed=cached)
                         if err:
                             results["errors"].append(err)
 
+                    for path, text, extra in to_check:
+                        self._check_links(DOCS_REPO, path, text, results, also_exists=extra)
                     pr_body = self._build_pr_body_subsections(
                         parent_title, f"{folder_path}/README.md", summary_children,
                         impacted_edits, "docs",
                         requester_name, requester_username, slack_channel, slack_thread_ts,
                     )
-                    pr_body = self._placement_block(results) + pr_body
+                    pr_body = self._placement_block(results) + self._gaps_block(draft_result) + self._style_block(draft_result, "doc_page") + pr_body
                     results["docs_pr"] = self._create_pr(
                         DOCS_REPO, branch,
                         f"📄 New Doc Pages: {parent_title} ({len(summary_children)} subsections)",
@@ -915,7 +989,7 @@ class GitHubPublisher:
                         results["docs_section"] = parent_section or "(not added to the sidebar)"
                     results["docs_file"] = file_path
 
-                    for asset_path in bundle_asset_paths:
+                    for asset_path in self._used_assets(bundle_asset_paths, full_content):
                         cached = self._asset_cache.get(asset_path)
                         err = self._upload_asset(DOCS_REPO, asset_path, f"{scoped_dir}/assets" if scoped_dir else "assets", branch, feature_slug, precompressed=cached)
                         if err:
@@ -942,7 +1016,8 @@ class GitHubPublisher:
                 if not subsections:
                     slug_title = feature_slug.replace("-", " ").title()
                     dp_title = self._extract_title(doc_page.get("content", ""), slug_title)
-                    pr_body = self._placement_block(results) + self._style_block(draft_result, "doc_page") + self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username, slack_channel, slack_thread_ts)
+                    self._check_links(DOCS_REPO, file_path, full_content, results)
+                    pr_body = self._placement_block(results) + self._gaps_block(draft_result) + self._style_block(draft_result, "doc_page") + self._build_pr_body(dp_title, doc_page, impacted_edits, "docs", requester_name, requester_username, slack_channel, slack_thread_ts)
                     results["docs_pr"] = self._create_pr(DOCS_REPO, branch, f"📄 New Doc Page: {dp_title}", pr_body)
             except Exception as e:
                 results["errors"].append(report_exception("Docs repo failed", e))

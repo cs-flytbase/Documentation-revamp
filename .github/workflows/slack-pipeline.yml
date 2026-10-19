@@ -68,6 +68,7 @@ jobs:
           fi
 
       - name: Fetch content from Worker KV and run pipeline
+        id: run
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           PL_FEATURE_NAME: ${{ steps.payload.outputs.feature_name }}
@@ -81,289 +82,20 @@ jobs:
           PL_TARGET_SECTION: ${{ steps.payload.outputs.target_section }}
           PL_DOC_SCOPE: ${{ steps.payload.outputs.doc_scope }}
           PL_HAS_SUBSECTIONS: ${{ steps.subsections.outputs.has_subsections }}
-        run: |
-          python3 <<'PYEOF'
-          import json, os, sys, urllib.request
-          sys.path.insert(0, '.')
-          from src.diag import annotate, annotate_errors, install_excepthook
-          install_excepthook()
-
-          feature_name = os.environ.get('PL_FEATURE_NAME', '')
-          mode = os.environ.get('PL_MODE', '') or 'both'
-          content_key = os.environ.get('PL_CONTENT_KEY', '')
-          worker_url = os.environ.get('PL_WORKER_URL', '')
-          slack_token = os.environ.get('SLACK_BOT_TOKEN', '')
-
-          # Step 0: Fetch content from Worker KV
-          print('=' * 60)
-          print(f'[Slack Pipeline] Fetching content from KV: {content_key}')
-          kv_url = f'{worker_url}/content?key={content_key}'
-          req = urllib.request.Request(kv_url, headers={'User-Agent': 'FlytBase-Pipeline/1.0'})
-          with urllib.request.urlopen(req) as resp:
-              kv_data = json.loads(resp.read().decode())
-
-          # Build content from KV data (new format: text_files + links + content)
-          raw_content = kv_data.get('content', '')
-          text_files = kv_data.get('text_files', [])
-          links = kv_data.get('links', [])
-          image_urls = kv_data.get('image_urls', [])
-
-          # Slack wraps links as '<url|display>'. Normalise before anything else.
-          def _clean(u):
-              u = (u or '').strip().lstrip('<').rstrip('>')
-              return u.split('|', 1)[0].strip()
-
-          links = [_clean(l) for l in links if _clean(l)]
-
-          # Separate video links from pages to scrape.
-          #
-          # A YouTube URL is an EMBED, not source material. Scraping the watch
-          # page pulls in the description, comments and recommended-video titles,
-          # which poisons the PM doc and has caused the drafting model to refuse
-          # outright. Video links go to youtube_link.txt for the embed instead.
-          _VIDEO_HOSTS = ('youtube.com', 'youtu.be', 'vimeo.com', 'loom.com', 'wistia.com')
-          video_links, page_links = [], []
-          for l in links:
-              (video_links if any(h in l.lower() for h in _VIDEO_HOSTS) else page_links).append(l)
-
-          if video_links:
-              print(f'[Slack Pipeline] Video link(s) kept for embedding, not scraped: {video_links}')
-          if page_links:
-              print(f'[Slack Pipeline] Page link(s) to scrape: {page_links}')
-
-          # Combine all content sources into one string for the Source Agent
-          content_parts = []
-          # Only non-video links are scraped
-          for link in page_links:
-              content_parts.append(link)
-          # Add text file contents
-          for tf in text_files:
-              content_parts.append(tf.get('content', ''))
-          # Add raw user text
-          if raw_content:
-              content_parts.append(raw_content)
-          content = '\n\n'.join(content_parts)
-
-          # Extract reference link (first link that looks like releases.flytbase.com)
-          reference_link = ''
-          comments = raw_content[:500] if raw_content else ''
-          for link in links:
-              if 'releases.flytbase.com' in link:
-                  reference_link = link
-                  break
-
-          print(f'[Slack Pipeline] Content: {len(content)} chars, Files: {len(text_files)}, Links: {len(links)}, Images: {len(image_urls)}')
-
-          # Step 0.5: Download images from Slack
-          from pathlib import Path
-          bundle_dir = f'input_bundles/{feature_name}'
-          Path(bundle_dir).mkdir(parents=True, exist_ok=True)
-
-          # The drafting agent reads the embed URL from this file. Nothing in the
-          # Slack path used to write it, so every Slack-triggered release note was
-          # drafted with no YouTube embed available.
-          if video_links:
-              (Path(bundle_dir) / 'youtube_link.txt').write_text(video_links[0])
-              print(f'[Slack Pipeline] Wrote youtube_link.txt: {video_links[0]}')
-
-          for i, url in enumerate(image_urls or []):
-              if not url: continue
-              ext = url.split('.')[-1].split('?')[0]
-              if ext not in ('png','jpg','jpeg','gif','webp'): ext = 'png'
-              filename = f'image-{i+1}.{ext}'
-              filepath = os.path.join(bundle_dir, filename)
-              req = urllib.request.Request(url, headers={'Authorization': f'Bearer {slack_token}'})
-              try:
-                  with urllib.request.urlopen(req) as resp:
-                      with open(filepath, 'wb') as f:
-                          f.write(resp.read())
-                  print(f'Downloaded: {filename}')
-              except Exception as e:
-                  print(f'Failed to download {url}: {e}')
-
-          # Step 1: Source Agent — build pm_doc from content
-          from src.agents.source import SourceAgent
-          from src.orchestrator import run_pipeline
-
-          print('[Slack Pipeline] Running Source Agent...')
-          source_agent = SourceAgent()
-          source_result = source_agent.build_pm_doc(
-              content=content,
-              comments=comments,
-              reference_link=reference_link,
-          )
-
-          if source_result.get('error'):
-              print(f'Source Agent failed: {source_result["error"]}')
-              annotate(f'Source Agent failed: {source_result["error"]}', title='Source Agent failed')
-              sys.exit(1)
-
-          pm_doc = source_result['pm_doc']
-          print(f'[Slack Pipeline] PM doc generated ({len(pm_doc)} chars)')
-
-          # Write pm_doc to bundle directory
-          pm_doc_path = Path(bundle_dir) / 'pm_doc.md'
-          pm_doc_path.write_text(pm_doc)
-
-          # Step 1.5: Load subsections if present
-          subsections = None
-          has_subsections = os.environ.get('PL_HAS_SUBSECTIONS', '')
-          if has_subsections == 'true':
-              import os
-              sub_path = '/tmp/subsections.json'
-              if os.path.exists(sub_path):
-                  with open(sub_path) as sf:
-                      subsections = json.load(sf)
-                  print(f'[Slack Pipeline] Subsections: {len(subsections.get("children", []))} children under "{subsections.get("parent_title", "")}"')
-
-          # Step 2: Run the existing pipeline
-          print('[Slack Pipeline] Running pipeline...')
-          requester_name = os.environ.get('PL_REQUESTER_NAME', '')
-          requester_username = os.environ.get('PL_REQUESTER_USERNAME', '')
-          slack_channel = os.environ.get('PL_SLACK_CHANNEL', '')
-          slack_thread_ts = os.environ.get('PL_SLACK_THREAD_TS', '')
-          target_section = os.environ.get('PL_TARGET_SECTION', '')
-          # Set by the Cloud / On-Premise button in Slack. Empty means cloud,
-          # which is where every page lived before on-premise existed.
-          doc_scope = os.environ.get('PL_DOC_SCOPE', '')
-          result = run_pipeline(bundle_dir, mode=mode, requester_name=requester_name, requester_username=requester_username, slack_channel=slack_channel, slack_thread_ts=slack_thread_ts, subsections=subsections, target_section=target_section, doc_scope=doc_scope)
-          print(f'[Slack Pipeline] Pipeline result: {result.get("status", "unknown")}')
-
-          # Save PR URLs and file paths for the notification step
-          from datetime import datetime
-          release_month = datetime.now().strftime('%B-%Y').lower()
-          pr_results = result.get('pr_results', {})
-          # Carry failure reasons through to Slack. Without this, a failed run
-          # dropped its errors here and the thread only ever said 'no PRs were
-          # created. Check the Actions log' - which is what hid a model refusal
-          # for two consecutive runs.
-          if result.get('status') != 'success' or result.get('errors'):
-              merged = list(pr_results.get('errors', [])) + list(result.get('errors', []))
-              if not merged:
-                  merged = [f"pipeline status: {result.get('status', 'unknown')} (no reason reported)"]
-              pr_results['errors'] = merged
-          draft = result.get('draft', {}) if 'draft' in result else {}
-          rn = draft.get('release_note', {}) if draft else {}
-          dp = draft.get('doc_page', {}) if draft else {}
-          pr_results['release_note_file'] = f'{release_month}/{rn.get("filename", "")}' if rn.get('filename') else ''
-          pr_results['doc_page_file'] = dp.get('filename', '')
-          with open('pr_results.json', 'w') as f:
-              json.dump(pr_results, f)
-          # Errors that were returned rather than raised still need an annotation,
-          # or a run that published nothing shows up as a clean success.
-          annotate_errors(pr_results.get('errors', []))
-          PYEOF
+        # The run lives in src/slack_run.py (tested), not in an inline script.
+        # It reports each stage live in Slack and writes pipeline_status.json.
+        # continue-on-error lets the notify step run; the last step fails the
+        # job if the run failed, so a green run in Actions means it worked.
+        continue-on-error: true
+        run: python3 -m src.slack_run
 
       - name: Notify Slack
         if: always()
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          PL_CONTENT_KEY: ${{ steps.payload.outputs.content_key }}
-          PL_WORKER_URL: ${{ steps.payload.outputs.worker_url }}
-        run: |
-          python3 <<'PYEOF'
-          import json, os, urllib.request
-
-          token = os.environ['SLACK_BOT_TOKEN']
-
-          # Fetch Slack channel/thread info from KV
-          content_key = os.environ.get('PL_CONTENT_KEY', '')
-          worker_url = os.environ.get('PL_WORKER_URL', '')
-          channel = ''
-          thread_ts = ''
-          try:
-              kv_url = f'{worker_url}/content?key={content_key}'
-              req = urllib.request.Request(kv_url, headers={'User-Agent': 'FlytBase-Pipeline/1.0'})
-              with urllib.request.urlopen(req) as resp:
-                  kv_data = json.loads(resp.read().decode())
-              channel = kv_data.get('slack_channel', '')
-              thread_ts = kv_data.get('slack_thread_ts', '')
-          except Exception as e:
-              print(f'Could not fetch Slack info from KV: {e}')
-
-          # Read PR results. No file means the pipeline step crashed before
-          # it could write one.
-          pr_results = {}
-          crashed = False
-          try:
-              with open('pr_results.json') as f:
-                  pr_results = json.load(f)
-          except Exception:
-              crashed = True
-
-          # Every message links its run, so anyone (including Son of Anton's
-          # diagnose_failure) can go from the thread straight to the log.
-          run_url = '{}/{}/actions/runs/{}'.format(
-              os.environ.get('GITHUB_SERVER_URL', 'https://github.com'),
-              os.environ.get('GITHUB_REPOSITORY', ''),
-              os.environ.get('GITHUB_RUN_ID', ''),
-          )
-
-          releases_pr = pr_results.get('releases_pr', '')
-          docs_pr = pr_results.get('docs_pr', '')
-          errors = pr_results.get('errors', [])
-
-          # Build message
-          rn_file = pr_results.get('release_note_file', '')
-          dp_file = pr_results.get('doc_page_file', '')
-
-          lines = []
-          if releases_pr:
-              lines.append(f':white_check_mark: *Release Note PR:* {releases_pr}')
-              if rn_file:
-                  lines.append('  File: ' + chr(96) + rn_file + chr(96) + ' in FlytBaseAILabs/flytbase-releases')
-          if docs_pr:
-              lines.append(f':white_check_mark: *Doc Page PR:* {docs_pr}')
-              # Say where the page landed, so a wrong section is visible here
-              # instead of being discovered after merge.
-              docs_file = pr_results.get('docs_file') or dp_file
-              if pr_results.get('docs_section'):
-                  lines.append('  Placed under: *' + pr_results['docs_section'] + '*')
-              if docs_file:
-                  lines.append('  File: ' + chr(96) + docs_file + chr(96) + ' in FlytBaseAILabs/flytbase-docs')
-              impacted = pr_results.get('docs_impacted') or []
-              if impacted:
-                  lines.append(f'  Also adds cross-links to {len(impacted)} existing page(s): ' + ', '.join(chr(96) + f + chr(96) for f in impacted))
-          warnings = pr_results.get('warnings') or []
-          if warnings:
-              lines.append(':warning: *Check before merging:*')
-              for w in warnings:
-                  lines.append(f'  • {w}')
-          if errors:
-              lines.append(':warning: *Errors:*')
-              for e in errors:
-                  lines.append(f'  • {e}')
-          if not lines and crashed:
-              lines.append(':x: The pipeline crashed before it could publish anything. Ask me why it failed and I will check the run.')
-          elif not lines:
-              lines.append(':x: No PRs were created and the pipeline reported no reason. Ask me why it failed and I will check the run.')
-
-          lines.append('')
-          lines.append(f'Run: {run_url}')
-          lines.append('Want me to change anything?')
-
-          message = '\n'.join(lines)
-
-          # Post to Slack
-          if channel and thread_ts:
-              payload = json.dumps({
-                  'channel': channel,
-                  'thread_ts': thread_ts,
-                  'text': message,
-              }).encode()
-              req = urllib.request.Request(
-                  'https://slack.com/api/chat.postMessage',
-                  data=payload,
-                  headers={
-                      'Authorization': f'Bearer {token}',
-                      'Content-Type': 'application/json',
-                  },
-              )
-              urllib.request.urlopen(req)
-              print(f'Posted to Slack: {channel}/{thread_ts}')
-          else:
-              print(f'No Slack channel/thread info. PR results: {message}')
-          PYEOF
+          PL_SLACK_CHANNEL: ${{ steps.payload.outputs.slack_channel }}
+          PL_SLACK_THREAD_TS: ${{ steps.payload.outputs.slack_thread_ts }}
+        run: python3 -m src.slack_notify
 
       - name: Upload pipeline output
         if: always()
@@ -372,3 +104,7 @@ jobs:
           name: slack-pipeline-output-${{ github.event.client_payload.feature_name }}
           path: output/
           retention-days: 14
+
+      - name: Fail the job if the run failed
+        if: always()
+        run: python3 -m src.slack_run --check-status

@@ -6,6 +6,7 @@ descriptions that the drafting agent can place precisely.
 """
 
 import base64
+import subprocess
 import json
 import mimetypes
 import re
@@ -44,6 +45,9 @@ Rules:
 - Do NOT try to guess which section heading the image belongs under. Just describe what you see and let the drafting agent decide placement.
 - Return ONLY valid JSON. No markdown wrapping, no commentary outside the JSON array.
 """
+
+
+VIDEO_SUFFIXES = (".mp4", ".mov", ".webm", ".m4v")
 
 
 def _extract_markers(pm_doc: str) -> list[dict]:
@@ -174,9 +178,42 @@ class VisionAgent(BaseAgent):
             data = base64.b64encode(f.read()).decode("utf-8")
         return data, media_type
 
+    def _extract_video_frames(self, file_path: str) -> list[tuple[str, str]]:
+        """Sample frames from a video with ffmpeg, as base64 PNGs.
+
+        One frame every 2 seconds, between 6 and 12 frames, scaled to at most
+        1280 px wide so on-screen text stays legible. Raises if ffmpeg is
+        missing or the file cannot be read, so the caller reports it.
+        """
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file_path],
+            capture_output=True, text=True, timeout=60,
+        )
+        duration = float((probe.stdout or "0").strip() or 0)
+        if duration <= 0:
+            raise ValueError(f"could not read the duration of {Path(file_path).name}")
+        count = max(6, min(12, int(duration // 2) or 1))
+        frames = []
+        for i in range(count):
+            t = duration * (i + 0.5) / count
+            shot = subprocess.run(
+                ["ffmpeg", "-v", "error", "-ss", f"{t:.2f}", "-i", file_path, "-frames:v", "1",
+                 "-vf", "scale='min(1280,iw)':-2", "-f", "image2pipe", "-vcodec", "png", "-"],
+                capture_output=True, timeout=60,
+            )
+            if shot.returncode == 0 and shot.stdout:
+                frames.append((base64.b64encode(shot.stdout).decode("utf-8"), "image/png"))
+        if not frames:
+            raise ValueError(f"no frames could be extracted from {Path(file_path).name}")
+        print(f"  [Vision] Video {Path(file_path).name}: {duration:.1f}s -> {len(frames)} frames")
+        return frames
+
     def _encode_image(self, file_path: str) -> tuple[str, str] | list[tuple[str, str]]:
-        """Encode an image or GIF. For animated GIFs, returns multiple frames."""
+        """Encode an image, GIF or video. GIFs and videos return several frames."""
         path = Path(file_path)
+        if path.suffix.lower() in VIDEO_SUFFIXES:
+            frames = self._extract_video_frames(file_path)
+            return frames if len(frames) > 1 else frames[0]
         if path.suffix.lower() == ".gif":
             frames = self._extract_gif_frames(file_path)
             if len(frames) > 1:

@@ -102,21 +102,28 @@ def test_source_agent_never_scrapes_video_pages():
 
 def test_pipeline_routes_video_links_to_the_embed_file():
     """youtube_link.txt was never written on the Slack path, so the embed was always empty."""
-    assert "youtube_link.txt" in PIPELINE
-    assert "video_links" in PIPELINE
-    assert "page_links" in PIPELINE
+    from src.slack_run import build_material
+    m = build_material({"links": ["<https://youtu.be/abc|video>", "https://docs.flytbase.com/x"], "content": "c"})
+    assert m["video_link"] == "https://youtu.be/abc"
+    assert "https://docs.flytbase.com/x" in m["content"] and "youtu.be" not in m["content"]
+    assert "youtube_link.txt" in (ROOT / "src/slack_run.py").read_text()
 
 
 def test_pipeline_strips_slack_link_decoration():
     """Slack sends '<url|display>' - the raw form broke matching."""
-    assert "_clean" in PIPELINE
-    assert "split('|', 1)" in PIPELINE
+    from src.slack_run import build_material
+    m = build_material({"links": ["<https://releases.flytbase.com/a|A>"], "content": "c"})
+    assert m["reference_link"] == "https://releases.flytbase.com/a"
 
 
 def test_failure_reasons_reach_slack():
     """A failed run used to drop its errors, leaving only 'check the Actions log'."""
-    assert "Carry failure reasons through to Slack" in PIPELINE
-    assert "Pipeline completed but no PRs were created" not in PIPELINE
+    from src.slack_notify import build_message
+    from src.slack_run import progress_text
+    msg = build_message({"docs_pr": "https://github.com/x/pull/1", "errors": ["Releases repo failed: boom"]}, {"status": "failed"}, "RUN")
+    assert "Releases repo failed: boom" in msg
+    failed = progress_text("F", ["material"], None, ("drafting", "the model refused"), {}, "RUN")
+    assert "*failed* - the model refused" in failed and "RUN" in failed
 
 
 def test_release_embed_is_the_real_convention():
@@ -129,15 +136,24 @@ def test_release_embed_is_the_real_convention():
 
 
 def test_no_video_means_no_embed():
-    """Two live release notes carry a literal YOUTUBE_URL / empty embed. With no
-    video the template writes no embed at all, and the model never writes one."""
+    """Two live release notes carry a literal YOUTUBE_URL / empty embed. Both
+    templates write the embed themselves, only when a real link exists, and the
+    model is told never to put one in a field."""
+    from src.doc_template import DOC_PAGE_PROMPT, render as render_doc
     from src.release_template import RELEASE_NOTE_PROMPT, render
-    out = render({"title": "T", "description": "d", "summary": "s", "features": [{"name": "F", "what": "w"}]}, [])["content"]
-    assert "{% embed" not in out and "YOUTUBE_URL" not in out
-    assert "No tables, headings, horizontal rules, hint blocks or video embeds inside any" in RELEASE_NOTE_PROMPT
+    rn = render({"title": "T", "description": "d", "problem": "p", "introduction": "i",
+                 "capabilities": [{"name": "F", "description": "w"}]}, [])["content"]
+    dp = render_doc({"title": "T", "description": "d", "overview": "o"}, [])[0]["content"]
+    for out in (rn, dp):
+        assert "{% embed" not in out and "YOUTUBE_URL" not in out
+    assert "video embeds" in RELEASE_NOTE_PROMPT and "video embeds" in DOC_PAGE_PROMPT
 
-
-def test_validation_catches_broken_embeds():
-    d = DRAFTING
-    assert 'url="YOUTUBE_URL"' in d and "CRITICAL" in d
-    assert "empty embed url" in d
+def test_embeds_written_by_the_templates_strip_model_embeds():
+    """An embed the model slips into a field is removed; only the template's survives."""
+    from src.doc_template import render as render_doc
+    from src.release_template import render
+    rn = render({"title": "T", "description": "d", "problem": '{% embed url="YOUTUBE_URL" %} p', "introduction": "i",
+                 "capabilities": [{"name": "F", "description": "w"}]}, [], youtube_link="https://youtu.be/real")["content"]
+    dp = render_doc({"title": "T", "description": "d", "overview": '{% embed url="" %} o'}, [], youtube_link="https://youtu.be/real")[0]["content"]
+    for out in (rn, dp):
+        assert out.count("{% embed") == 1 and 'url="https://youtu.be/real"' in out

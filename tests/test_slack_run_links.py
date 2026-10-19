@@ -6,16 +6,22 @@ reported as "the pipeline reported no reason" with nothing to follow.
 """
 from pathlib import Path
 
-WORKFLOWS = Path(__file__).resolve().parents[1] / ".github/workflows"
+ROOT = Path(__file__).resolve().parents[1]
+WORKFLOWS = ROOT / ".github/workflows"
 
 
 def test_slack_messages_link_their_run():
-    for name in ("slack-pipeline.yml", "bulk-replace.yml"):
-        src = (WORKFLOWS / name).read_text()
-        assert "chat.postMessage" in src
-        assert "actions/runs/" in src and "GITHUB_RUN_ID" in src, f"{name} posts to Slack without the run link"
+    from src.slack_notify import build_message
+    from src.slack_run import progress_text
+    assert "Run: RUN" in build_message({"docs_pr": "https://github.com/x/pull/1"}, {"status": "success"}, "RUN")
+    assert "Run: RUN" in progress_text("F", [], "material", None, {}, "RUN")
+    for name in ("slack_run.py", "slack_notify.py"):
+        assert "GITHUB_RUN_ID" in (ROOT / "src" / name).read_text()
+    bulk = (WORKFLOWS / "bulk-replace.yml").read_text()
+    assert "actions/runs/" in bulk and "GITHUB_RUN_ID" in bulk
 
 
 def test_crash_is_not_reported_as_no_reason():
-    src = (WORKFLOWS / "slack-pipeline.yml").read_text()
-    assert "crashed before it could publish" in src
+    from src.slack_notify import build_message
+    assert "died before it could say anything useful" in build_message({}, None, "RUN")
+    assert build_message({}, {"status": "failed", "stage": "drafting"}, "RUN") is None  # progress message says it

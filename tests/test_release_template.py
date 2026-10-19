@@ -1,124 +1,111 @@
-"""The release note template is enforced by code: same structure every time,
-brief per field, no total length limit, every asset embedded exactly once."""
+"""Release note template (senior review, 2026-10-19): a marketable note.
+Problem, what it is, why it matters, who it is for, takeaways. No steps."""
 import re
 
-from src.release_template import (
-    DOC_LINK_PLACEHOLDER, check_fields, docs_url, finalize_doc_link, render,
-)
-
-ASSETS = ["zone-overlays.gif", "zone-proximity.gif", "live-annotations.gif"]
+from src.release_template import DOC_LINK_PLACEHOLDER, check_fields, docs_url, finalize_doc_link, render
 
 FIELDS = {
     "filename": "cockpit-3-0-video-overlays.md",
-    "title": "Cockpit 3.0: Zone Overlays, Proximity Warnings and Live Annotations",
-    "description": "See zones on the live video, get warned near no-fly zones, and draw on the feed for your team.",
-    "summary": "Cockpit 3.0 adds three video overlays. They help pilots keep clear of no-fly zones and brief people who watch the flight.",
-    "features": [
-        {"name": "Zone Overlays", "what": "No-fly zones and the geofence are drawn on the live video.",
-         "how_to_use": ["Click **Video overlays** at the bottom-right of the video.", "Turn on **Zone overlays**."],
-         "assets": [{"file": "zone-overlays.gif", "alt": "No-fly zone in red and geofence in green on the live video"}]},
-        {"name": "Zone Proximity Warnings", "what": "The video glows red and shows the distance when the drone nears a no-fly zone.",
-         "how_to_use": "Turn on **Zone proximity warnings** in **Video overlays**.",
-         "assets": [{"file": "zone-proximity.gif", "alt": "Red glow and NFZ distance badge"}]},
-        {"name": "Live Annotations", "what": "Draw on the live video so everyone in the cockpit sees it.",
-         "how_to_use": ["Turn on **Live annotations**.", "Click the annotation button and pick a tool."],
-         "assets": []},
+    "title": "Cockpit 3.0: See Zones, Get Warned, Brief Your Team on the Live Video",
+    "feature_name": "Cockpit 3.0 Video Overlays",
+    "description": "No-fly zones on the live video, proximity warnings, and live annotations in Cockpit 3.0.",
+    "problem": "Pilots had to compare the video with the map to know where a no-fly zone was. Nothing on the video warned them before they reached one.",
+    "introduction": "Cockpit 3.0 adds three overlays to the live video. Zones are drawn on the feed, approaching a no-fly zone triggers a warning, and pilots can draw on the video for everyone watching.",
+    "capabilities": [
+        {"name": "Zone Overlays", "description": "No-fly zones and the geofence are drawn on the live video.", "asset": "zone-overlays.gif"},
+        {"name": "Zone Proximity Warnings", "description": "The video glows red and shows the distance to the NFZ.", "asset": "zone-proximity.gif"},
+        {"name": "Live Annotations", "description": "Draw arrows, circles and markers on the feed.", "asset": ""},
     ],
-    "good_to_know": ["Zone overlays show zones that are set up for the site."],
+    "why_it_matters": [{"benefit": "One screen", "detail": "Zones are on the video, so pilots stop switching to the map."},
+                       {"benefit": "Earlier warnings", "detail": "Pilots see the distance before they reach an NFZ."}],
+    "who_its_for": [{"audience": "Remote pilots", "value": "Keep clear of restricted airspace."},
+                    {"audience": "Observers", "value": "See exactly what the pilot is pointing at."}],
+    "key_takeaways": ["Zones are visible on the video.", "Warnings start before the NFZ."],
+    "hero_asset": "hero.gif",
+    "access": "",
 }
+REQUIRED = ["hero.gif", "zone-overlays.gif", "zone-proximity.gif"]
 
 
-def _render(**kw):
-    return render(FIELDS, ASSETS, **kw)
-
-
-def test_fixed_structure_in_fixed_order():
-    out = _render(youtube_link="https://youtu.be/x", doc_title="Cockpit 3.0 Video Overlays")["content"]
+def test_fixed_structure_and_order():
+    out = render(FIELDS, REQUIRED, youtube_link="https://youtu.be/x", doc_title="Cockpit Video Overlays")["content"]
     headings = re.findall(r"^#{1,3} .+$", out, re.M)
     assert headings == [
-        "# Cockpit 3.0: Zone Overlays, Proximity Warnings and Live Annotations",
-        "## What's New",
+        "# Cockpit 3.0: See Zones, Get Warned, Brief Your Team on the Live Video",
+        "## The Problem", "## Introducing Cockpit 3.0 Video Overlays",
         "### Zone Overlays", "### Zone Proximity Warnings", "### Live Annotations",
-        "## Good to Know",
-        "## Learn More",
+        "## Why It Matters", "## Who It's For", "## Key Takeaways",
     ]
     lines = out.splitlines()
-    assert lines[2] == '{% embed url="https://youtu.be/x" %}'
+    assert lines[2] == '{% embed url="https://youtu.be/x" %}'        # video first
+    assert lines[4].startswith("![") and "assets/hero.gif" in lines[4]  # then the visual introduction
 
 
-def test_nothing_doc_like_can_appear():
-    out = _render()["content"]
-    for banned in ("Why This Matters", "Constraints", "Troubleshooting", "| ", "{% hint", "\n---\n"):
+def test_never_contains_documentation():
+    out = render(FIELDS, REQUIRED)["content"]
+    for banned in ("Step", "How to use", "| ", "Constraints", "Troubleshooting", "{% hint", "\n1. "):
         assert banned not in out
 
 
-def test_every_asset_embedded_exactly_once_even_if_the_model_forgot_one():
-    out = _render()["content"]
-    for a in ASSETS:
+def test_benefits_and_audiences_render_as_labelled_bullets():
+    out = render(FIELDS, REQUIRED)["content"]
+    assert "- **One screen:** Zones are on the video, so pilots stop switching to the map." in out
+    assert "- **Remote pilots:** Keep clear of restricted airspace." in out
+    assert "- Zones are visible on the video." in out
+
+
+def test_access_only_for_feature_flagged_features():
+    assert "## Access" not in render(FIELDS, REQUIRED)["content"]
+    flagged = render(FIELDS, REQUIRED, feature_flag="video_overlays")["content"]
+    assert "## Access" in flagged and "`video_overlays`" in flagged
+    assert check_fields({**FIELDS, "access": "Contact support."}, REQUIRED) == [
+        'release note "access" must be empty: this feature is not behind a feature flag']
+
+
+def test_required_assets_are_never_dropped():
+    forgot = {**FIELDS, "hero_asset": "", "capabilities": [dict(c, asset="") for c in FIELDS["capabilities"]]}
+    out = render(forgot, REQUIRED)["content"]
+    for a in REQUIRED:
         assert out.count(f"](assets/{a})") == 1
-    # The forgotten GIF lands under the last feature with a usable alt text.
-    assert out.index("](assets/live-annotations.gif)") > out.index("### Live Annotations")
 
 
-def test_steps_render_as_one_line_or_a_numbered_list():
-    out = _render()["content"]
-    assert "**How to use it:** Turn on **Zone proximity warnings** in **Video overlays**." in out
-    assert "**How to use it:**\n\n1. Click **Video overlays** at the bottom-right of the video.\n2. Turn on **Zone overlays**." in out
+def test_optional_assets_only_when_chosen():
+    out = render(FIELDS, ["hero.gif"], optional_assets=["zone-overlays.gif", "zone-proximity.gif", "extra.png"])["content"]
+    assert "assets/zone-overlays.gif" in out and "assets/extra.png" not in out
 
 
-def test_single_feature_has_no_redundant_subheading():
-    one = {**FIELDS, "features": [FIELDS["features"][0]]}
-    out = render(one, ["zone-overlays.gif"])["content"]
-    assert "### " not in out and "## What's New" in out
+def test_field_checks():
+    bad = {**FIELDS, "description": "x" * 151, "problem": "a. b. c. d. e.", "why_it_matters": [],
+           "hero_asset": "nope.gif", "capabilities": [dict(FIELDS["capabilities"][0], asset="zone-overlays.gif"),
+                                                      dict(FIELDS["capabilities"][1], asset="zone-overlays.gif")]}
+    joined = "\n".join(check_fields(bad, REQUIRED))
+    for expected in ("description is 151 characters", '"problem" has more than 4 sentences',
+                     '"why_it_matters" needs at least 2 entries', "asset 'nope.gif' that is not in RELEASE ASSETS",
+                     "asset 'zone-proximity.gif' missing from release note", "uses asset 'zone-overlays.gif' more than once"):
+        assert expected in joined
 
 
-def test_no_length_limit_many_features_all_kept():
-    many = {**FIELDS, "features": [{"name": f"Feature {i}", "what": "Does a thing. " * 3, "how_to_use": ["Step."] * 5} for i in range(12)]}
+def test_no_length_limit():
+    many = {**FIELDS, "capabilities": [{"name": f"Capability {i}", "description": "Does one thing well."} for i in range(15)]}
     out = render(many, [])["content"]
-    assert out.count("### Feature ") == 12
-    assert not check_fields(many, [])
+    assert out.count("### Capability ") == 15
 
 
-def test_field_checks_ask_for_targeted_fixes():
-    bad = {**FIELDS, "description": "x" * 151, "features": [
-        {"name": "Zone Overlays", "what": "One. Two. Three. Four.", "how_to_use": ["s"] * 6,
-         "assets": [{"file": "nope.gif"}]}]}
-    problems = check_fields(bad, ASSETS)
-    joined = "\n".join(problems)
-    assert "description is 151 characters" in joined
-    assert '"what" has more than 3 sentences' in joined
-    assert "6 steps (max 5)" in joined
-    assert "unknown asset 'nope.gif'" in joined
-    assert "asset 'zone-proximity.gif' missing from release note" in joined
+def test_structure_in_fields_is_stripped():
+    sneaky = {**FIELDS, "problem": "## Why\n1. Step one\n{% hint style=\"info\" %}x{% endhint %}\nPilots struggled."}
+    out = render(sneaky, REQUIRED)["content"]
+    assert "## Why\n" not in out and "1. Step" not in out and "{% hint" not in out and "Pilots struggled." in out
 
 
-def test_structure_slipped_into_fields_is_removed():
-    sneaky = {**FIELDS, "summary": "## Why This Matters\nIt matters.\n---\n{% hint style=\"info\" %}x{% endhint %}"}
-    out = render(sneaky, ASSETS)["content"]
-    assert "Why This Matters" in out  # the words survive as prose...
-    assert "## Why This Matters" not in out and "{% hint" not in out  # ...the structure does not
-
-
-def test_learn_more_links_to_the_doc_page_or_disappears():
-    out = _render(doc_title="Cockpit 3.0 Video Overlays")["content"]
-    assert DOC_LINK_PLACEHOLDER in out
-    linked = finalize_doc_link(out, "https://docs.flytbase.com/in-flight-modules/cockpit-video-overlays")
-    assert "[Cockpit 3.0 Video Overlays](https://docs.flytbase.com/in-flight-modules/cockpit-video-overlays)" in linked
+def test_doc_link_line_is_filled_or_removed():
+    out = render(FIELDS, REQUIRED, doc_title="Cockpit Video Overlays")["content"]
+    linked = finalize_doc_link(out, "https://docs.flytbase.com/in-flight-modules/video-overlays")
+    assert "For setup steps and full details, see [Cockpit Video Overlays](https://docs.flytbase.com/in-flight-modules/video-overlays)." in linked
     dropped = finalize_doc_link(out, None)
-    assert "Learn More" not in dropped and DOC_LINK_PLACEHOLDER not in dropped
-    assert dropped.rstrip().endswith("- Zone overlays show zones that are set up for the site.")
+    assert DOC_LINK_PLACEHOLDER not in dropped and "full details" not in dropped
+    assert dropped.rstrip().endswith("- Warnings start before the NFZ.")
 
 
-def test_no_learn_more_without_a_doc_page():
-    assert "Learn More" not in _render()["content"]
-
-
-def test_docs_urls():
-    assert docs_url("flinks-and-flows/flex-factory/smart-flight-logs.md") == "https://docs.flytbase.com/flinks-and-flows/flex-factory/smart-flight-logs"
+def test_docs_url():
     assert docs_url("flinks-and-flows/flex-factory/README.md") == "https://docs.flytbase.com/flinks-and-flows/flex-factory"
-    assert docs_url("on-premise/installation/x.md") == "https://docs.flytbase.com/on-premise/installation/x"
-
-
-def test_frontmatter_shape():
-    fm = _render()["frontmatter"]
-    assert fm.startswith("---\ndescription: >-\n  See zones") and fm.endswith("\n---")
+    assert docs_url("a/b.md") == "https://docs.flytbase.com/a/b"
