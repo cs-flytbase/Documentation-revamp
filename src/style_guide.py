@@ -20,7 +20,7 @@ MAX_RULES = 15
 # Applies to release notes and doc pages alike.
 STYLE_RULES = [
     "Write plain technical English (ASD-STE100 style): short sentences, active voice, concrete terms.",
-    "Say what the feature does, then why it matters. No storytelling hooks, no build-up, no marketing language.",
+    "No storytelling hooks, no build-up, no hype words. Persuade only with concrete facts.",
     'Address the reader as "you". Refer to the company as "FlytBase", never "we", "our" or "us".',
     "Use only facts from the source material. Never invent a number, limit, capability, setting, link or date.",
     "State limitations plainly. Do not soften or hide them.",
@@ -48,9 +48,19 @@ DOC_PAGE_RULES = [
 ]
 
 
+# Tone differs by output (senior review, 2026-10-19): the release note sells
+# the value of the release; the doc page is a technical reference.
+TONE = {
+    "release": "TONE: a marketable note. Lead with the problem and the value of the approach: what the operator "
+               "gains, who it is for, what they walk away with. Confident and concrete, never hype.",
+    "doc": "TONE: a technical reference, not marketing. Neutral, exhaustive, precise. Every section must make "
+           "sense on its own, because it is often read by an LLM answering a single question.",
+}
+
+
 def style_block(kind: str) -> str:
     """The rules block for a prompt. kind is "release" or "doc"."""
-    lines = ["WRITING RULES (follow all of them):"]
+    lines = [TONE.get(kind, TONE["doc"]), "", "WRITING RULES (follow all of them):"]
     lines += [f"{i}. {r}" for i, r in enumerate(STYLE_RULES, 1)]
     if kind == "doc":
         lines.append("")

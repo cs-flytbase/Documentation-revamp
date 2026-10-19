@@ -129,15 +129,24 @@ def test_release_embed_is_the_real_convention():
 
 
 def test_no_video_means_no_embed():
-    """Two live release notes carry a literal YOUTUBE_URL / empty embed. With no
-    video the template writes no embed at all, and the model never writes one."""
+    """Two live release notes carry a literal YOUTUBE_URL / empty embed. Both
+    templates write the embed themselves, only when a real link exists, and the
+    model is told never to put one in a field."""
+    from src.doc_template import DOC_PAGE_PROMPT, render as render_doc
     from src.release_template import RELEASE_NOTE_PROMPT, render
-    out = render({"title": "T", "description": "d", "summary": "s", "features": [{"name": "F", "what": "w"}]}, [])["content"]
-    assert "{% embed" not in out and "YOUTUBE_URL" not in out
-    assert "No tables, headings, horizontal rules, hint blocks or video embeds inside any" in RELEASE_NOTE_PROMPT
+    rn = render({"title": "T", "description": "d", "problem": "p", "introduction": "i",
+                 "capabilities": [{"name": "F", "description": "w"}]}, [])["content"]
+    dp = render_doc({"title": "T", "description": "d", "overview": "o"}, [])[0]["content"]
+    for out in (rn, dp):
+        assert "{% embed" not in out and "YOUTUBE_URL" not in out
+    assert "video embeds" in RELEASE_NOTE_PROMPT and "video embeds" in DOC_PAGE_PROMPT
 
-
-def test_validation_catches_broken_embeds():
-    d = DRAFTING
-    assert 'url="YOUTUBE_URL"' in d and "CRITICAL" in d
-    assert "empty embed url" in d
+def test_embeds_written_by_the_templates_strip_model_embeds():
+    """An embed the model slips into a field is removed; only the template's survives."""
+    from src.doc_template import render as render_doc
+    from src.release_template import render
+    rn = render({"title": "T", "description": "d", "problem": '{% embed url="YOUTUBE_URL" %} p', "introduction": "i",
+                 "capabilities": [{"name": "F", "description": "w"}]}, [], youtube_link="https://youtu.be/real")["content"]
+    dp = render_doc({"title": "T", "description": "d", "overview": '{% embed url="" %} o'}, [], youtube_link="https://youtu.be/real")[0]["content"]
+    for out in (rn, dp):
+        assert out.count("{% embed") == 1 and 'url="https://youtu.be/real"' in out

@@ -20,6 +20,7 @@ from src.agents.research import ResearchAgent
 from src.agents.vision import VisionAgent
 from src.agents.drafting import DraftingAgent
 from src.agents.verification import VerificationAgent
+from src.doc_template import render_master
 
 
 def _save_feature_note(draft_result: dict, research_result: dict, pm_doc: str, bundle_name: str) -> None:
@@ -223,12 +224,17 @@ def fetch_exemplar(research_result: dict, doc_scope=CLOUD) -> str:
         return ""
 
 
-def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "") -> dict:
+def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "", asset_audience: dict | None = None, feature_flag: str = "") -> dict:
     """Run the full documentation generation pipeline.
 
     doc_scope ("cloud" or "onprem") selects the documentation set. It arrives
     from the Slack button click in the dispatch payload and is never inferred
     from the request text.
+
+    asset_audience maps an asset filename to "release", "doc" or "both", as
+    agreed with the requester in Slack. feature_flag is set only when the
+    requester said the feature is behind one; it is what adds an Access section
+    to the release note.
     """
     # A subsections block with no children is not a subsections request. Some
     # models fill the optional tool field with an empty skeleton; treating it as
@@ -342,6 +348,8 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                 exemplar=exemplar,
                 mode=mode,
                 subsection_focus=child,
+                asset_audience=asset_audience,
+                feature_flag=feature_flag,
             )
             if "error" in child_draft:
                 print(f"    Child draft FAILED: {child_draft['error']}")
@@ -357,14 +365,15 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
 
         # Build parent overview page
         print(f"\n  [Drafting] Generating parent overview: {subsections['parent_title']}...")
-        child_links = "\n".join(
-            f"* [{c['title']}]({c['slug']}.md)" for c in subsections["children"]
-        )
+        # The parent is a master page: a lighter template that introduces the
+        # section and lists what is in it.
         parent_content = (
             f"---\ndescription: >-\n  {subsections['parent_summary'][:140]}\n---\n\n"
-            f"# {subsections['parent_title']}\n\n"
-            f"{subsections['parent_summary']}\n\n"
-            f"## In This Section\n\n{child_links}\n"
+            + render_master(
+                subsections["parent_title"], subsections["parent_summary"],
+                [{"title": c["title"], "path": f"{c['slug']}.md", "summary": c.get("summary", "")}
+                 for c in subsections["children"]],
+            )
         )
 
         # Package as subsections draft result for the publisher
@@ -390,6 +399,9 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
         for cr in child_results:
             ws = cr["draft"].pop("_validation_warnings", [])
             validation_warnings.extend(ws)
+            for key, items in (cr["draft"].get("_style_report") or {}).items():
+                draft_result.setdefault("_style_report", {}).setdefault(key, []).extend(f"{cr['slug']}: {i}" for i in items)
+            draft_result.setdefault("_doc_gaps", []).extend(f"{cr['slug']}: {g}" for g in cr["draft"].get("_doc_gaps", []))
 
         print(f"  Subsection drafting complete. {len(child_results)} children + 1 parent.")
         print(f"    Impacted page edits: {len(draft_result['impacted_page_edits'])}")
@@ -411,6 +423,8 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
             transcript=bundle["transcript"],
             exemplar=exemplar,
             mode=mode,
+            asset_audience=asset_audience,
+            feature_flag=feature_flag,
         )
 
         if "error" in draft_result:

@@ -1,86 +1,85 @@
 """The release note template, enforced by code.
 
-The model never writes release note Markdown. It returns the template's
-fields as JSON, and render() builds the page. Every release note therefore
-has the same structure, in the same order, and cannot grow a constraints
-table, a troubleshooting section or a 3000-character walkthrough.
+A release note is a note, not documentation: it says what problem existed,
+what was released, why the approach is worth it, who it is for and what the
+reader walks away with. It has no steps, settings tables or troubleshooting;
+those live on the doc page it links to. (Senior review, 2026-10-19.)
 
-Brevity comes from the size of each field (a few sentences, a few steps),
-not from a limit on the whole note: a release with eight features is long,
-and nothing is cut to make it fit.
+The model never writes release note Markdown. It returns the template's
+fields as JSON and render() builds the page, so every release note has the
+same structure in the same order:
 
     ---
-    description: <one sentence, max 150 characters>
+    description: <one sentence>
     ---
     # <Title>
-    {% embed url="<video>" %}              only if a video was given
+    {% embed url="<video>" %}                 only if a video was given
+    ![hero](assets/<hero>)                    visual introduction, if an image is given
+    ## The Problem
+    ## Introducing <Feature>
+    ### <Capability>  + image                   one per capability when there are several
+    ## Why It Matters                         benefits of the approach (value proposition)
+    ## Who It's For
+    ## Key Takeaways                          what the reader walks away with
+    For setup and full details, see [<doc page>](<link>).   only if a doc page is published
+    ## Access                                 ONLY for features behind a feature flag
 
-    <Summary: 2-3 sentences>
-
-    ## What's New
-    ### <Feature>                          omitted when there is one feature
-    <1-3 sentences: what it does and why it matters>
-    **How to use it:** <one line>  |  numbered steps (up to 5)
-    ![alt](assets/<file>)
-
-    ## Good to Know                        only if there are points
-    - <key requirement or limit>           up to 5
-
-    ## Learn More                          only when a doc page is published
-    [<Doc page title>](<link>)
+There is no length limit: each field is short, and a release with many
+capabilities is allowed to be long.
 """
 import re
 from pathlib import Path
 
-# The publisher replaces this with the doc page's live URL once it knows where
-# the page is placed, or removes the Learn More section if there is no page.
 DOC_LINK_PLACEHOLDER = "{{DOC_PAGE_URL}}"
-LEARN_MORE_HEADING = "## Learn More"
+DOC_LINK_PREFIX = "For setup steps and full details, see "
 
-MAX_FEATURE_SENTENCES = 3
-MAX_STEPS = 5
-MAX_GOOD_TO_KNOW = 5
+MAX_PROBLEM_SENTENCES = 4
+MAX_INTRO_SENTENCES = 4
+MAX_CAPABILITY_SENTENCES = 3
+MAX_LIST = 6
 
 RELEASE_NOTE_PROMPT = r"""You are the Drafting Agent for the FlytBase documentation pipeline.
-You are writing a RELEASE NOTE: a brief overview of what was released and how to use it.
+You are writing a RELEASE NOTE: a short, marketable note announcing what was released.
 
-The release note is NOT the documentation. The doc page carries every technical
-detail (full steps, constraints, troubleshooting); the release note links to it.
-Keep each field brief, but do not drop any feature or anything a user needs in
-order to start using it.
+It is NOT documentation. It never contains steps, settings, tables, edge cases or
+troubleshooting; the doc page has all of that and the release note links to it.
+It answers: what problem existed, what was released, why this approach is worth
+it, who it is for, and what the reader walks away with.
 
 You do not write Markdown or choose the structure. Fill in the fields below as
 JSON; the page is built from them by code in a fixed template.
 
 {
   "filename": "feature-slug.md",
-  "title": "Plain title naming what was released, e.g. 'Cockpit 3.0: Zone Overlays, Proximity Warnings and Live Annotations'",
-  "description": "One sentence, at most 150 characters, saying what is new.",
-  "summary": "2-3 sentences: what is new and who it is for.",
-  "features": [
-    {
-      "name": "Feature name as it appears in the product",
-      "what": "1-3 sentences: what it does and why it matters to the operator.",
-      "how_to_use": ["Short step", "Short step"],
-      "assets": [{"file": "exact-asset-filename.gif", "alt": "What the image or GIF shows"}]
-    }
+  "title": "Plain title naming what was released",
+  "feature_name": "The feature or release name as used in the product",
+  "description": "One sentence, at most 150 characters: what is new and the main benefit.",
+  "problem": "2-4 sentences: what was hard, slow or impossible before, in the operator's terms.",
+  "introduction": "2-4 sentences: what the feature is and what it does.",
+  "capabilities": [
+    {"name": "Capability name", "description": "1-3 sentences: what it does for the operator.", "asset": "exact-asset-filename.gif or empty"}
   ],
-  "good_to_know": ["Only key requirements or limits a user must know before using it."]
+  "why_it_matters": [{"benefit": "Short benefit", "detail": "One sentence explaining it, concretely."}],
+  "who_its_for": [{"audience": "Role or team", "value": "What changes for them, in one sentence."}],
+  "key_takeaways": ["What the reader walks away with, one line each."],
+  "hero_asset": "exact-asset-filename to show at the top, or empty",
+  "access": "Only if the FEATURE FLAG block below names a flag: one or two sentences on how to get it enabled. Otherwise empty."
 }
 
 Field rules:
-- features: one entry per feature or change in the source, in the source's order.
-  Never merge two features into one entry or drop one.
-- what: at most 3 sentences. Facts from the source only.
-- how_to_use: the shortest way to start using it, as at most 5 short steps
-  (or a single step). Exact on-screen labels in **bold**. Leave out options,
-  edge cases and settings detail; those belong on the doc page.
-- assets: attach every asset from the ASSET MAP to the feature it shows, using
-  the exact filename. Each asset is used exactly once.
-- good_to_know: 0-5 short bullets, only requirements or limits that would stop
-  someone from using the feature. Omit it ([]) when there are none.
-- No tables, headings, horizontal rules, hint blocks or video embeds inside any
-  field. The template adds the video automatically.
+- capabilities: one entry per distinct capability in the source, in the source's order.
+  Never merge two capabilities or drop one. A single-capability release has one entry.
+- why_it_matters: 3-5 benefits of this approach. Concrete outcomes (fewer steps,
+  faster response, one screen instead of two), never vague praise.
+- who_its_for: 2-4 audiences actually named or clearly implied by the source.
+- key_takeaways: 3-5 lines.
+- Assets: use only filenames from RELEASE ASSETS. Every asset listed as REQUIRED
+  must be used exactly once (as hero_asset or a capability asset). OPTIONAL assets
+  may be used if they show a capability well. Never use one asset twice.
+- Persuasive through concrete value, never through hype: no "game-changer",
+  "seamless", "revolutionary", "imagine...", or invented numbers.
+- No headings, tables, horizontal rules, hint blocks, step lists or video embeds
+  inside any field. The template adds the video automatically.
 
 Return ONLY the JSON object. No markdown wrapping.
 """
@@ -90,113 +89,146 @@ def _sentences(text: str) -> list[str]:
     return [s for s in re.split(r"(?<=[.!?])\s+", (text or "").strip()) if s]
 
 
-def _clean_field(text: str) -> str:
+def _clean(text) -> str:
     """Fields are prose: strip structure the model may have slipped in."""
-    text = (text or "").strip()
-    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.M)              # headings
-    text = re.sub(r"^\s*(---|\*\*\*)\s*$", "", text, flags=re.M)     # rules
-    text = re.sub(r"\{%.*?%\}", "", text, flags=re.S)                # directives
-    return re.sub(r"\n{2,}", "\n", text).strip()
+    text = str(text or "").strip()
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.M)
+    text = re.sub(r"^\s*(---|\*\*\*)\s*$", "", text, flags=re.M)
+    text = re.sub(r"\{%.*?%\}", "", text, flags=re.S)
+    text = re.sub(r"^\s*(\d+[.)]|[-*])\s+", "", text, flags=re.M)
+    return re.sub(r"\s*\n\s*", " ", text).strip()
 
 
-def check_fields(data: dict, asset_filenames: list[str]) -> list[str]:
+def _alt(text: str, file: str) -> str:
+    alt = " ".join(str(text or Path(file).stem.replace("-", " ").replace("_", " ")).split())
+    return alt.replace("[", "(").replace("]", ")")
+
+
+def check_fields(data: dict, required_assets: list[str], optional_assets: list[str] = (),
+                 feature_flag: str = "") -> list[str]:
     """Problems with the model's fields, phrased for a targeted retry."""
     problems = []
-    for key in ("title", "description", "summary"):
-        if not str(data.get(key, "")).strip():
+    for key in ("title", "description", "problem", "introduction"):
+        if not _clean(data.get(key)):
             problems.append(f'release note field "{key}" is empty')
     if len(str(data.get("description", ""))) > 150:
-        problems.append(f'release note description is {len(data["description"])} characters (max 150)')
-    features = data.get("features") or []
-    if not features:
-        problems.append("release note has no features")
-    used = []
-    for f in features:
-        name = f.get("name", "?")
-        if len(_sentences(f.get("what", ""))) > MAX_FEATURE_SENTENCES:
-            problems.append(f'release note feature "{name}": "what" has more than {MAX_FEATURE_SENTENCES} sentences')
-        steps = f.get("how_to_use") or []
-        if isinstance(steps, str):
-            steps = [steps]
-        if len(steps) > MAX_STEPS:
-            problems.append(f'release note feature "{name}": {len(steps)} steps (max {MAX_STEPS}); keep only the essentials')
-        for a in f.get("assets") or []:
-            used.append(a.get("file") if isinstance(a, dict) else a)
-    if len(data.get("good_to_know") or []) > MAX_GOOD_TO_KNOW:
-        problems.append(f"release note good_to_know has more than {MAX_GOOD_TO_KNOW} points")
-    for missing in [a for a in asset_filenames if a not in used]:
-        problems.append(f"asset '{missing}' missing from release note (attach it to the feature it shows)")
-    for unknown in [u for u in used if u not in asset_filenames]:
-        problems.append(f"release note uses unknown asset '{unknown}' (use only ASSET MAP filenames)")
+        problems.append(f'release note description is {len(str(data["description"]))} characters (max 150)')
+    if len(_sentences(data.get("problem"))) > MAX_PROBLEM_SENTENCES:
+        problems.append(f'release note "problem" has more than {MAX_PROBLEM_SENTENCES} sentences')
+    if len(_sentences(data.get("introduction"))) > MAX_INTRO_SENTENCES:
+        problems.append(f'release note "introduction" has more than {MAX_INTRO_SENTENCES} sentences')
+    caps = [c for c in (data.get("capabilities") or []) if isinstance(c, dict)]
+    if not caps:
+        problems.append("release note has no capabilities")
+    for c in caps:
+        if len(_sentences(c.get("description"))) > MAX_CAPABILITY_SENTENCES:
+            problems.append(f'release note capability "{c.get("name", "?")}": more than {MAX_CAPABILITY_SENTENCES} sentences')
+    for key, low in (("why_it_matters", 2), ("who_its_for", 1), ("key_takeaways", 2)):
+        items = data.get(key) or []
+        if len(items) < low:
+            problems.append(f'release note "{key}" needs at least {low} entries')
+        if len(items) > MAX_LIST:
+            problems.append(f'release note "{key}" has more than {MAX_LIST} entries')
+    allowed = set(required_assets) | set(optional_assets)
+    used = [a for a in [data.get("hero_asset")] + [c.get("asset") for c in caps] if a]
+    for a in used:
+        if a not in allowed:
+            problems.append(f"release note uses asset '{a}' that is not in RELEASE ASSETS")
+    for a in required_assets:
+        if a not in used:
+            problems.append(f"asset '{a}' missing from release note (use it as hero_asset or a capability asset)")
+    dupes = {a for a in used if used.count(a) > 1}
+    for a in dupes:
+        problems.append(f"release note uses asset '{a}' more than once")
+    if not feature_flag and _clean(data.get("access")):
+        problems.append('release note "access" must be empty: this feature is not behind a feature flag')
     return problems
 
 
-def render(data: dict, asset_filenames: list[str], youtube_link: str = "",
-           doc_title: str = "", asset_descriptions: dict | None = None) -> dict:
+def render(data: dict, required_assets: list[str], youtube_link: str = "", doc_title: str = "",
+           asset_descriptions: dict | None = None, feature_flag: str = "",
+           optional_assets: list[str] = ()) -> dict:
     """Build the release note. Returns {"filename", "frontmatter", "content"}.
 
-    Every asset is embedded exactly once: assets the model did not attach go
-    under the last feature with their vision description as alt text, so a
-    GIF can never silently disappear.
+    Every REQUIRED asset is embedded exactly once even if the model forgot it.
+    The Access section exists only when a feature flag is known.
     """
-    asset_descriptions = asset_descriptions or {}
-    title = _clean_field(data.get("title", "")) or "Release Note"
-    description = " ".join(_clean_field(data.get("description", "")).split())
-    summary = _clean_field(data.get("summary", ""))
-    features = [f for f in (data.get("features") or []) if isinstance(f, dict)]
+    descs = asset_descriptions or {}
+    allowed = set(required_assets) | set(optional_assets)
+    title = _clean(data.get("title")) or "Release Note"
+    feature = _clean(data.get("feature_name")) or title
+    caps = [c for c in (data.get("capabilities") or []) if isinstance(c, dict)]
 
-    placed = set()
-    for f in features:
-        kept = []
-        for a in f.get("assets") or []:
-            file = a.get("file") if isinstance(a, dict) else a
-            if file in asset_filenames and file not in placed:
-                kept.append({"file": file, "alt": (a.get("alt") if isinstance(a, dict) else "") or asset_descriptions.get(file, "")})
-                placed.add(file)
-        f["_assets"] = kept
-    leftover = [a for a in asset_filenames if a not in placed]
-    if leftover:
-        if not features:
-            features = [{"name": title, "what": "", "how_to_use": []}]
-        features[-1].setdefault("_assets", [])
-        features[-1]["_assets"] += [{"file": a, "alt": asset_descriptions.get(a, "")} for a in leftover]
+    used = set()
+
+    def take(file):
+        if file and file in allowed and file not in used:
+            used.add(file)
+            return file
+        return None
+
+    hero = take(data.get("hero_asset"))
+    cap_assets = [take(c.get("asset")) for c in caps]
+    missing = [a for a in required_assets if a not in used]
+    for a in missing:  # attach forgotten required assets: hero first, then capabilities
+        if not hero:
+            hero = take(a)
+            continue
+        slot = next((i for i, x in enumerate(cap_assets) if not x), None)
+        if slot is None:
+            caps.append({"name": "", "description": ""})
+            cap_assets.append(None)
+            slot = len(caps) - 1
+        cap_assets[slot] = take(a)
 
     out = [f"# {title}", ""]
     if youtube_link:
         out += [f'{{% embed url="{youtube_link}" %}}', ""]
-    if summary:
-        out += [summary, ""]
+    if hero:
+        out += [f"![{_alt(descs.get(hero), hero)}](assets/{hero})", ""]
 
-    out += ["## What's New", ""]
-    single = len(features) == 1
-    for f in features:
-        if not single:
-            out += [f"### {_clean_field(f.get('name', '')) or 'Update'}", ""]
-        what = _clean_field(f.get("what", ""))
-        if what:
-            out += [what, ""]
-        steps = f.get("how_to_use") or []
-        if isinstance(steps, str):
-            steps = [steps]
-        steps = [_clean_field(re.sub(r"^\s*(\d+[.)]|[-*])\s+", "", s)) for s in steps if str(s).strip()]
-        if len(steps) == 1:
-            out += [f"**How to use it:** {steps[0]}", ""]
-        elif steps:
-            out += ["**How to use it:**", ""] + [f"{i}. {s}" for i, s in enumerate(steps, 1)] + [""]
-        for a in f.get("_assets", []):
-            alt = " ".join((a["alt"] or Path(a["file"]).stem.replace("-", " ")).split()).replace("]", ")").replace("[", "(")
-            out += [f"![{alt}](assets/{a['file']})", ""]
+    out += ["## The Problem", "", _clean(data.get("problem")), ""]
+    out += [f"## Introducing {feature}", "", _clean(data.get("introduction")), ""]
+    multi = len([c for c in caps if _clean(c.get("name"))]) > 1
+    for c, asset in zip(caps, cap_assets):
+        name, desc = _clean(c.get("name")), _clean(c.get("description"))
+        if multi and name:
+            out += [f"### {name}", ""]
+        if desc and (multi or desc != _clean(data.get("introduction"))):
+            out += [desc, ""]
+        if asset:
+            out += [f"![{_alt(descs.get(asset) or name, asset)}](assets/{asset})", ""]
 
-    good = [_clean_field(g) for g in (data.get("good_to_know") or []) if str(g).strip()]
-    if good:
-        out += ["## Good to Know", ""] + [f"- {g}" for g in good] + [""]
+    def bullets(key, a, b):
+        rows = []
+        for item in data.get(key) or []:
+            if isinstance(item, dict):
+                head, tail = _clean(item.get(a)), _clean(item.get(b))
+                if head:
+                    rows.append(f"- **{head.rstrip(':.')}:** {tail}" if tail else f"- **{head}**")
+            elif _clean(item):
+                rows.append(f"- {_clean(item)}")
+        return rows
+
+    out += ["## Why It Matters", ""] + bullets("why_it_matters", "benefit", "detail") + [""]
+    out += ["## Who It's For", ""] + bullets("who_its_for", "audience", "value") + [""]
+    out += ["## Key Takeaways", ""] + bullets("key_takeaways", "", "") + [""]
 
     if doc_title:
-        out += [LEARN_MORE_HEADING, "", f"For the full details, see [{doc_title}]({DOC_LINK_PLACEHOLDER}).", ""]
+        out += [f"{DOC_LINK_PREFIX}[{doc_title}]({DOC_LINK_PLACEHOLDER}).", ""]
+
+    if feature_flag:
+        access = _clean(data.get("access")) or (
+            f"{feature} is behind the `{feature_flag}` feature flag and is not enabled by default. "
+            "Contact your FlytBase account team to enable it for your organization.")
+        if f"`{feature_flag}`" not in access and feature_flag not in access:
+            access += f" Feature flag: `{feature_flag}`."
+        out += ["## Access", "", access, ""]
 
     filename = Path(str(data.get("filename") or "release-note.md")).name
     if not filename.endswith(".md"):
         filename += ".md"
+    description = " ".join(_clean(data.get("description")).split())
     return {
         "filename": filename,
         "frontmatter": f"---\ndescription: >-\n  {description}\n---",
@@ -205,12 +237,13 @@ def render(data: dict, asset_filenames: list[str], youtube_link: str = "",
 
 
 def finalize_doc_link(content: str, url: str | None) -> str:
-    """Put the doc page's URL into Learn More, or drop the section if there is none."""
+    """Put the doc page's URL into the link line, or drop the line if there is no page."""
     if DOC_LINK_PLACEHOLDER not in content:
         return content
     if url:
         return content.replace(DOC_LINK_PLACEHOLDER, url)
-    return re.sub(rf"\n?{re.escape(LEARN_MORE_HEADING)}\n.*?(?=\n## |\Z)", "\n", content, flags=re.S).rstrip() + "\n"
+    lines = [l for l in content.split("\n") if DOC_LINK_PLACEHOLDER not in l]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).rstrip() + "\n"
 
 
 def docs_url(repo_path: str) -> str:
