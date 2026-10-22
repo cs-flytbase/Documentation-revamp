@@ -91,11 +91,17 @@ def build_material(kv: dict) -> dict:
                        "kind": "video" if ext in VIDEO_EXTS else "image"})
 
     intake = kv.get("intake") or {}
-    by_original = {a["original"]: a["file"] for a in assets}
+    # The same name can arrive twice (Slack saves the second copy as "-2").
+    # The agreed routing applies to every copy; identical copies are merged
+    # before drafting (src/assets.py).
+    by_original: dict[str, list] = {}
+    for a in assets:
+        by_original.setdefault(a["original"], []).append(a["file"])
     audience = {}
     for original, aud in (intake.get("asset_audience") or {}).items():
-        if aud in ("release", "doc", "both") and original in by_original:
-            audience[by_original[original]] = aud
+        if aud in ("release", "doc", "both"):
+            for f in by_original.get(original, []):
+                audience[f] = aud
     return {
         "content": "\n\n".join(p for p in parts if p),
         "comments": raw[:500],
@@ -282,6 +288,18 @@ def main() -> int:
             if err:
                 failed_downloads.append(f"{a['original']} ({err})")
         got = len(m["assets"]) - len(failed_downloads)
+        # Files the material names that never arrived (Slack takes 10 files per
+        # message; the rest of a batch is easy to lose). Flagged, never fatal.
+        from src.assets import missing_named
+        attention = []
+        missing = missing_named(m["content"], [a["original"] for a in m["assets"]] + [a["file"] for a in m["assets"]])
+        if missing:
+            attention.append(f"The material names {len(missing)} file(s) that were never received: "
+                             + ", ".join(missing[:12]) + (" ..." if len(missing) > 12 else "")
+                             + ". Send them in the thread and ask for a re-run, or remove them from the material.")
+        if failed_downloads:
+            attention.append("Could not download from Slack: " + "; ".join(failed_downloads)
+                             + ". Re-share those files and ask for a re-run.")
         if m["assets"] and not got:
             return fail("none of the files could be downloaded from Slack: " + "; ".join(failed_downloads[:3]))
         videos = sum(1 for a in m["assets"] if a["kind"] == "video")
@@ -312,21 +330,15 @@ def main() -> int:
             requester_username=env.get("PL_REQUESTER_USERNAME", ""), slack_channel=channel,
             slack_thread_ts=thread_ts, subsections=subsections, target_section=env.get("PL_TARGET_SECTION", ""),
             doc_scope=env.get("PL_DOC_SCOPE", ""), asset_audience=m["asset_audience"],
-            feature_flag=m["feature_flag"], on_stage=on_stage,
+            feature_flag=m["feature_flag"], on_stage=on_stage, attention=attention,
         )
 
         pr_results = result.get("pr_results") or {}
         errors = list(pr_results.get("errors") or []) + list(result.get("errors") or [])
-        if failed_downloads:
-            pr_results.setdefault("warnings", []).append("Could not download: " + "; ".join(failed_downloads))
         draft = result.get("draft") or {}
-        if result.get("status") == "verification_failed":
-            v = result.get("verification") or {}
-            crit = [i for i in v.get("issues", []) if i.get("severity") == "critical"]
-            first = (crit[0].get("claim") or crit[0].get("description") or "")[:160] if crit else ""
-            pr_results.setdefault("warnings", []).append(
-                f"Fact check: {len(crit)} claim(s) not supported by your material (score {v.get('faithfulness_score', '?')}/10)"
-                + (f', e.g. "{first}"' if first else "") + ". Read the PR before merging.")
+        # What a person must check, from every stage, for the Slack message.
+        if not pr_results.get("needs_attention"):
+            pr_results["needs_attention"] = list(dict.fromkeys(list(result.get("attention") or []) + attention))
         from datetime import datetime
         month = datetime.now().strftime("%B-%Y").lower()
         rn_name = (draft.get("release_note") or {}).get("filename") or ""

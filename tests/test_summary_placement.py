@@ -139,7 +139,7 @@ def test_publisher_honours_requested_section_over_the_model_guess(monkeypatch):
 def test_publisher_warns_loudly_when_section_is_unknown(monkeypatch):
     pub, files = _publisher(monkeypatch, CLOUD)
     results = _publish(pub, "Flux Factori Of Doom")
-    assert any("Flux Factori Of Doom" in w for w in results["warnings"])
+    assert any("Flux Factori Of Doom" in w for w in results["needs_attention"])
     assert "⚠️" in files["__pr_body__"]
 
 

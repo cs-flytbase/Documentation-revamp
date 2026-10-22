@@ -6,7 +6,9 @@ descriptions that the drafting agent can place precisely.
 """
 
 import base64
+import os
 import subprocess
+import time
 import json
 import mimetypes
 import re
@@ -48,6 +50,8 @@ Rules:
 
 
 VIDEO_SUFFIXES = (".mp4", ".mov", ".webm", ".m4v")
+BATCH_SIZE = 6      # assets per model call; one bad answer costs a batch, not the run
+MAX_ATTEMPTS = 3    # per model, with exponential backoff
 
 
 def _extract_markers(pm_doc: str) -> list[dict]:
@@ -99,8 +103,9 @@ class VisionAgent(BaseAgent):
             name="vision",
             system_prompt=SYSTEM_PROMPT,
             temperature=0.1,
-            max_tokens=2048,
+            max_tokens=4096,
         )
+        self._sleep = time.sleep
 
     def _extract_gif_frames(self, file_path: str) -> list[tuple[str, str]]:
         """Extract key frames from a GIF and return as base64-encoded PNGs.
@@ -259,8 +264,9 @@ Examine all {len(filenames)} images provided above. For each asset file, return 
 Consider the images as a set — reason about their sequence and how they relate to each other.
 Return a single JSON array with {len(filenames)} objects, in the same order as the asset files listed."""
 
-    def _call_vision_batch(self, prompt_text: str, encoded_images: list[tuple[str, str]]) -> str:
-        """Send all images plus text prompt in a single LLM call."""
+    def _call_vision_batch(self, prompt_text: str, encoded_images: list[tuple[str, str]], model: str | None = None) -> str:
+        """Send the images plus the text prompt in one call."""
+        model = model or self.model
         if self.provider in ("openai", "groq"):
             content_parts = []
             for base64_data, media_type in encoded_images:
@@ -273,7 +279,7 @@ Return a single JSON array with {len(filenames)} objects, in the same order as t
             content_parts.append({"type": "text", "text": prompt_text})
 
             response = self.client.chat.completions.create(
-                model=self.model,
+                model=model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 messages=[
@@ -297,7 +303,7 @@ Return a single JSON array with {len(filenames)} objects, in the same order as t
             content_parts.append({"type": "text", "text": prompt_text})
 
             response = self.client.messages.create(
-                model=self.model,
+                model=model,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 system=self.system_prompt,
@@ -306,132 +312,152 @@ Return a single JSON array with {len(filenames)} objects, in the same order as t
             return response.content[0].text
 
     def describe_all_assets(self, file_paths: list[str], pm_doc: str = "") -> list[dict]:
-        """Describe all assets in a single batch call with full PM doc context.
+        """Describe every asset, with the full PM doc as context. One dict per file, in order.
 
-        Args:
-            file_paths: List of absolute paths to image/GIF files.
-            pm_doc: The FULL PM document text (not truncated).
-
-        Returns:
-            List of description dicts, one per asset file.
+        Never fails and never returns a placeholder (P0, 2026-10-22). In the
+        Cockpit 3.0 run all 13 descriptions came back as "Image asset: <file>":
+        one call carried every image, its answer did not parse, and the
+        placeholder became the published alt text. Now:
+          - assets go in batches of BATCH_SIZE, so one bad answer costs a batch;
+          - each batch is retried with backoff, then tried on VISION_FALLBACK_MODEL;
+          - an asset that still has no description gets alt text built from its
+            file name and the material around it, marked "_fallback" so the PR
+            says so.
         """
         if not file_paths:
             return []
-
         filenames = [Path(p).name for p in file_paths]
         markers = _extract_markers(pm_doc) if pm_doc else []
+        print(f"  [Vision] Processing {len(file_paths)} assets in batches of {BATCH_SIZE}")
+        described: dict[str, dict] = {}
+        for start in range(0, len(file_paths), BATCH_SIZE):
+            described.update(self._describe_batch(file_paths[start:start + BATCH_SIZE], pm_doc, markers))
+        out = []
+        for i, name in enumerate(filenames):
+            item = described.get(name)
+            out.append(item if item else self._fallback_result(name, markers, i, pm_doc))
+        return out
 
-        print(f"  [Vision] Processing {len(file_paths)} assets in single batch call")
-        print(f"  [Vision] PM doc length: {len(pm_doc)} chars, {len(markers)} markers found")
-
-        # Encode all images — GIFs may produce multiple frames
-        encoded_images = []
-        gif_frame_counts = {}  # track which files are multi-frame GIFs
-        for i, path in enumerate(file_paths):
+    def _describe_batch(self, paths: list[str], pm_doc: str, markers: list[dict]) -> dict[str, dict]:
+        """{file name: description} for the files the model described."""
+        names, images, notes = [], [], []
+        for path in paths:
+            name = Path(path).name
             try:
-                result = self._encode_image(path)
-                if isinstance(result, list):
-                    # Multi-frame GIF — store frames separately
-                    gif_frame_counts[i] = len(result)
-                    encoded_images.append(result[0])  # placeholder for indexing
-                    print(f"  [Vision] GIF {filenames[i]}: extracted {len(result)} key frames")
-                else:
-                    encoded_images.append(result)
-            except Exception as e:
-                print(f"  [Vision] WARNING: Could not encode {Path(path).name}: {e}")
-                encoded_images.append(None)
-
-        # Filter out failed encodes but track indices
-        valid_indices = [i for i, img in enumerate(encoded_images) if img is not None]
-        valid_filenames = [filenames[i] for i in valid_indices]
-
-        if not valid_indices:
-            return [self._fallback_result(fn, markers, idx) for idx, fn in enumerate(filenames)]
-
-        # Build flat image list — expand GIF frames inline
-        valid_images = []
-        for i in valid_indices:
-            if i in gif_frame_counts:
-                # Re-extract frames for this GIF
-                frames = self._extract_gif_frames(file_paths[i])
-                valid_images.extend(frames)
+                enc = self._encode_image(path)
+            except Exception as e:  # noqa: BLE001 - an unreadable file gets a fallback, not a crash
+                print(f"  [Vision] WARNING: could not read {name}: {e}")
+                continue
+            names.append(name)
+            if isinstance(enc, list):
+                images.extend(enc)
+                notes.append(f"- {name}: {len(enc)} key frames in sequence. Describe the FULL workflow across them.")
             else:
-                valid_images.append(encoded_images[i])
+                images.append(enc)
+        if not names:
+            return {}
+        prompt = self._build_prompt(pm_doc, names, markers)
+        if notes:
+            prompt += "\n\n## Animation and Video Frame Notes\n" + "\n".join(notes)
 
-        prompt_text = self._build_prompt(pm_doc, valid_filenames, markers)
+        fallback = os.environ.get("VISION_FALLBACK_MODEL", "").strip()
+        models = [self.model] + ([fallback] if fallback and fallback != self.model else [])
+        best: dict[str, dict] = {}
+        for model in models:
+            for attempt in range(MAX_ATTEMPTS):
+                try:
+                    raw = self._call_vision_batch(prompt, images, model=model)
+                    got = self._parse_batch(raw, names)
+                    if len(got) > len(best):
+                        best = got
+                    if len(best) == len(names):
+                        return best
+                    print(f"  [Vision] {model}: described {len(got)}/{len(names)} (attempt {attempt + 1})")
+                except Exception as e:  # noqa: BLE001 - retried, then a fallback model, then context alt text
+                    print(f"  [Vision] {model} failed (attempt {attempt + 1}): {e}")
+                if attempt + 1 < MAX_ATTEMPTS:
+                    self._sleep(2 ** attempt)
+        return best
 
-        # Add GIF frame context to the prompt
-        if gif_frame_counts:
-            gif_notes = []
-            for i in valid_indices:
-                if i in gif_frame_counts:
-                    gif_notes.append(
-                        f"- {filenames[i]} is an animated GIF. {gif_frame_counts[i]} key frames "
-                        f"are provided in sequence. Describe the FULL workflow shown across all frames."
-                    )
-            prompt_text += "\n\n## GIF Frame Notes\n" + "\n".join(gif_notes)
-
-        raw_response = self._call_vision_batch(prompt_text, valid_images)
-
-        # Parse response
-        results = self._parse_response(raw_response, valid_filenames, markers)
-
-        # Re-insert fallbacks for any images that failed to encode
-        if len(valid_indices) < len(filenames):
-            full_results = []
-            valid_iter = iter(results)
-            for i, fn in enumerate(filenames):
-                if i in valid_indices:
-                    full_results.append(next(valid_iter))
-                else:
-                    full_results.append(self._fallback_result(fn, markers, i))
-            return full_results
-
-        return results
-
-    def _parse_response(self, raw: str, filenames: list[str], markers: list[dict]) -> list[dict]:
-        """Parse the LLM JSON response, with fallback handling."""
-        text = raw.strip()
-        # Strip markdown code fences if present
+    @staticmethod
+    def _parse_batch(raw: str, names: list[str]) -> dict[str, dict]:
+        """Parse the model's JSON array; match objects by file name, then by position."""
+        text = (raw or "").strip()
         if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         try:
             parsed = json.loads(text)
-            if isinstance(parsed, list):
-                # Ensure we have the right count
-                while len(parsed) < len(filenames):
-                    idx = len(parsed)
-                    parsed.append(self._fallback_result(filenames[idx], markers, idx))
-                return parsed[:len(filenames)]
-            elif isinstance(parsed, dict):
-                # Single object returned — wrap it
-                return [parsed] + [
-                    self._fallback_result(fn, markers, i + 1)
-                    for i, fn in enumerate(filenames[1:])
-                ]
         except json.JSONDecodeError:
-            pass
+            start, end = text.find("["), text.rfind("]")
+            if start == -1 or end <= start:
+                return {}
+            try:
+                parsed = json.loads(text[start:end + 1])
+            except json.JSONDecodeError:
+                return {}
+        if isinstance(parsed, dict):
+            parsed = [parsed]
+        if not isinstance(parsed, list):
+            return {}
+        out: dict[str, dict] = {}
+        loose = []
+        for obj in parsed:
+            if not isinstance(obj, dict) or not str(obj.get("description", "")).strip():
+                continue
+            if obj.get("file_name") in names and obj["file_name"] not in out:
+                out[obj["file_name"]] = obj
+            else:
+                loose.append(obj)
+        # Objects without a usable file name fill the remaining files in order,
+        # only when the counts line up exactly (otherwise they could be swapped).
+        rest = [n for n in names if n not in out]
+        if loose and len(loose) == len(rest):
+            for name, obj in zip(rest, loose):
+                out[name] = {**obj, "file_name": name}
+        return out
 
-        # Complete fallback
-        return [self._fallback_result(fn, markers, i) for i, fn in enumerate(filenames)]
+    def _fallback_result(self, filename: str, markers: list[dict], index: int, pm_doc: str = "") -> dict:
+        """A usable description when the model could not describe the file.
 
-    def _fallback_result(self, filename: str, markers: list[dict], index: int) -> dict:
-        """Generate a fallback result when parsing fails."""
-        heading = None
-        step_number = None
+        Built from the file name and the material that mentions it; never a
+        placeholder like "Image asset: x.png". Marked "_fallback" so the PR
+        asks a person to check the alt text.
+        """
+        heading = step_number = None
         is_hero = False
-
         if index < len(markers):
             heading = markers[index].get("heading")
             step_number = markers[index].get("step_number")
             is_hero = markers[index].get("marker_type") == "HERO GIF"
-
+        text = context_alt(filename, pm_doc, heading)
         return {
             "file_name": filename,
-            "description": f"Image asset: {filename}",
-            "section_heading": heading or "Unknown",
+            "description": text,
+            "section_heading": heading or "",
             "step_number": step_number,
-            "alt_text": filename,
+            "alt_text": text,
             "is_hero": is_hero,
+            "_fallback": True,
         }
+
+
+def _humanize(filename: str) -> str:
+    stem = Path(filename).stem
+    stem = re.sub(r"[-_]+", " ", stem)
+    stem = re.sub(r"\b\d{1,2}\b", " ", stem)          # step numbers: "zone overlays 01 panel"
+    stem = re.sub(r"\b(final|copy|v\d+|img|image|screenshot)\b", " ", stem, flags=re.I)
+    stem = " ".join(stem.split())
+    return stem[:1].upper() + stem[1:] if stem else "Feature screenshot"
+
+
+def context_alt(filename: str, pm_doc: str = "", heading: str | None = None) -> str:
+    """Alt text from the file name, plus the material's own words when it names the file."""
+    base = _humanize(filename)
+    for line in (pm_doc or "").splitlines():
+        if filename in line or Path(filename).stem in line:
+            words = re.sub(r"[`*_#>\[\]()]|!\[.*?\]", " ", line.replace(filename, ""))
+            words = " ".join(words.split()).strip(" :-.")
+            if len(words) >= 12:
+                return f"{base}: {words[:120]}"
+            break
+    return f"{base} ({heading})" if heading else base

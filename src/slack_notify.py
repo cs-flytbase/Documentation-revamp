@@ -44,11 +44,19 @@ def build_message(pr: dict, status: dict | None, run_url: str) -> str | None:
         lines.append(f"  Access section added for feature flag {_code(pr['feature_flag'])}.")
 
     if pr.get("doc_gaps"):
-        lines += ["", ":jigsaw: *Your material didn't cover these, so the doc page says so instead of inventing them:*"]
+        lines += ["", ":jigsaw: *Your material didn't cover these sections, so I left them off the doc page instead of inventing them:*"]
         lines += [f"  • {g}" for g in pr["doc_gaps"]]
         lines.append("  Send me the details and I'll add them to the PR.")
-    if pr.get("warnings"):
-        lines += ["", ":warning: *Check before merging:*"] + [f"  • {w}" for w in pr["warnings"]]
+    attention = list(pr.get("needs_attention") or [])
+    if attention:
+        lines += ["", f":warning: *Needs your eyes before merging ({len(attention)}).* "
+                      "I fixed what I could; these I won't guess at:"] + [f"  • {w}" for w in attention]
+        lines.append("  Same list is at the top of the PR, with a needs-attention label so nobody can pretend they missed it.")
+    others = [w for w in pr.get("warnings") or [] if w not in attention]
+    if others:
+        lines += ["", ":warning: *Check before merging:*"] + [f"  • {w}" for w in others]
+    if pr.get("fixes"):
+        lines += ["", f":wrench: Fixed {len(pr['fixes'])} thing(s) myself on the way. Details are in the PR, if you enjoy reading."]
     if pr.get("errors"):
         lines += ["", ":x: *Errors:*"] + [f"  • {e}" for e in pr["errors"]]
 

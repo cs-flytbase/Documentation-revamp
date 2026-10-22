@@ -102,7 +102,11 @@ def _item_placement(item: Item, matched: str) -> Placement:
         folder = _common_dir([c.path for c in item.children]) or posixpath.dirname(item.path)
         indent = item.children[0].indent
     else:
-        folder = posixpath.dirname(item.path)
+        # A page becoming a parent (Cockpit 3.0 > Zone Overlays): its children
+        # live in a folder named after it, next to it, like GitBook does.
+        base, name = posixpath.split(item.path)
+        stem = posixpath.splitext(name)[0]
+        folder = base if stem.lower() == "readme" else posixpath.join(base, stem)
         indent = item.indent + 2
     label = " > ".join(([item.heading] if item.heading and norm(item.heading) != norm(item.title) else []) + _chain(item))
     return Placement(label, folder, _last_line(item) + 1, indent, matched)
@@ -114,7 +118,23 @@ def _heading_placement(lines, items, idx: int, title: str) -> Placement | None:
         return Placement(title, "", idx + 2 if idx + 1 < len(lines) and not lines[idx + 1].strip() else idx + 1, 0, "heading")
     top = min(it.indent for it in block)
     last = max(_last_line(it) for it in block)
-    return Placement(title, _common_dir([it.path for it in block]), last + 1, top, "heading")
+    return Placement(title, _section_dir([it.path for it in block]), last + 1, top, "heading")
+
+
+def _section_dir(paths: list[str]) -> str:
+    """The folder a section's pages live in. One stray page elsewhere (AVSS at
+    the repo root under In-Flight Modules) must not send new pages to the root:
+    fall back to the top folder most of the pages share."""
+    common = _common_dir(paths)
+    if common:
+        return common
+    from collections import Counter
+    tops = Counter(p.split("/", 1)[0] for p in paths if "/" in p)
+    if tops:
+        top, n = tops.most_common(1)[0]
+        if n * 2 > len(paths):
+            return top
+    return ""
 
 
 def resolve_section(summary: str, wanted: str, allow_leaf: bool = True) -> Placement | None:
@@ -199,3 +219,104 @@ def insert_entries(summary: str, placement: Placement, entries: list[tuple[str, 
     new = [" " * (placement.indent + 2 * depth) + f"* [{title}]({rel})" for title, rel, depth in entries]
     lines[placement.insert_at:placement.insert_at] = new
     return "\n".join(lines) + "\n"
+
+
+# ── Placement without guessing (P0, 2026-10-22) ──────────────────────────
+#
+# The Cockpit 3.0 doc was placed from a stale IA file, the guess failed to
+# resolve, and a legacy fallback invented a new "## Live Video Feed" group.
+# These helpers give the model the LIVE sidebar to choose from, resolve its
+# choice exactly, fall back to the nearest real ancestor, and check the
+# sidebar after writing.
+
+
+def chain_label(item: Item) -> str:
+    """'In-Flight Modules > How to Manage Your Flight Operations > Cockpit 3.0'."""
+    head = [item.heading] if item.heading and norm(item.heading) != norm(_chain(item)[0]) else []
+    return " > ".join(head + _chain(item))
+
+
+def parent_chains(summary: str) -> list[str]:
+    """Every place a page can go, one exact label per line, for the model to pick from."""
+    _, items, headings = parse(summary)
+    out = [h for _, h in headings]
+    out += [chain_label(it) for it in items]
+    seen, unique = set(), []
+    for label in out:
+        if label not in seen:
+            seen.add(label)
+            unique.append(label)
+    return unique
+
+
+def resolve_exact(summary: str, chain: str) -> Placement | None:
+    """Resolve a label copied from parent_chains(). Exact match only; a page
+    (leaf) is allowed because the label names it exactly."""
+    want = norm(chain)
+    if not want:
+        return None
+    lines, items, headings = parse(summary)
+    hits = [it for it in items if norm(chain_label(it)) == want]
+    if len(hits) == 1:
+        return _item_placement(hits[0], "item" if hits[0].children else "leaf item")
+    if hits:
+        return None
+    heads = [(i, h) for i, h in headings if norm(h) == want]
+    if len(heads) == 1:
+        return _heading_placement(lines, items, *heads[0])
+    return None
+
+
+def nearest_ancestor(summary: str, guess: str) -> Placement | None:
+    """The deepest existing section along a guessed breadcrumb.
+
+    "In-Flight Modules > ... > Multi View Dashboard > Live Video Feed", where
+    Live Video Feed is a page, resolves to Multi View Dashboard. Never a leaf,
+    never a new section.
+    """
+    parts = [p for p in re.split(r"\s*(?:>|/)\s*", guess or "") if norm(p)]
+    for i in range(len(parts), 0, -1):
+        placement = resolve_section(summary, " > ".join(parts[:i]), allow_leaf=False)
+        if placement:
+            return placement
+    return None
+
+
+def validate_insert(before: str, after: str, placement: Placement, exists=None, base: str = "") -> list[str]:
+    """Problems with a sidebar edit: anything other than new '* [..](..)' lines
+    at the placement. exists(repo_path) checks linked files; base is the
+    SUMMARY.md directory."""
+    import difflib
+    problems = []
+    old, new = before.splitlines(), after.splitlines()
+    added = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=old, b=new, autojunk=False).get_opcodes():
+        if tag in ("replace", "delete"):
+            problems.append(f"{i2 - i1} existing sidebar line(s) were changed or removed")
+        if tag in ("replace", "insert"):
+            added += list(range(j1, j2))
+    added_set = set(added)
+    _, items, _ = parse(after)
+    by_idx = {it.idx: it for it in items}
+    want_parent = norm(placement.label.split(" > ")[-1])
+    links = [it.path for it in items]
+    for j in added:
+        line = new[j]
+        if not line.strip():
+            continue
+        if line.lstrip().startswith("#"):
+            problems.append(f'a new sidebar group was added: "{line.strip()}"')
+            continue
+        item = by_idx.get(j)
+        if not item:
+            problems.append(f'a line that is not a page entry was added: "{line.strip()}"')
+            continue
+        parent = norm(item.parent.title) if item.parent else norm(item.heading)
+        if parent != want_parent and not (item.parent and item.parent.idx in added_set):
+            problems.append(f'"{item.title}" is under "{item.parent.title if item.parent else item.heading}", '
+                            f'not "{placement.label}"')
+        if links.count(item.path) > 1:
+            problems.append(f'"{item.path}" is listed more than once')
+        if exists is not None and not exists(posixpath.join(base, item.path) if base else item.path):
+            problems.append(f'"{item.title}" links to {item.path}, which does not exist')
+    return problems
