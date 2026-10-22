@@ -257,7 +257,9 @@ def main() -> int:
         progress.start("material")
         url = f"{env.get('PL_WORKER_URL', '')}/content?key={env.get('PL_CONTENT_KEY', '')}"
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "FlytBase-Pipeline/1.0"}), timeout=30) as r:
+            # The worker serves stored material only with the shared token.
+            headers = {"User-Agent": "FlytBase-Pipeline/1.0", "X-Content-Token": env.get("PL_CONTENT_TOKEN", "")}
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30) as r:
                 kv = json.loads(r.read().decode())
         except Exception as e:  # noqa: BLE001
             return fail(f"could not fetch the stored material ({e}). It expires after 24 hours; send it again.")

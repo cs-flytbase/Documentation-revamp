@@ -75,6 +75,7 @@ jobs:
           PL_MODE: ${{ steps.payload.outputs.mode }}
           PL_CONTENT_KEY: ${{ steps.payload.outputs.content_key }}
           PL_WORKER_URL: ${{ steps.payload.outputs.worker_url }}
+          PL_CONTENT_TOKEN: ${{ secrets.CONTENT_TOKEN }}
           PL_REQUESTER_NAME: ${{ steps.payload.outputs.requester_name }}
           PL_REQUESTER_USERNAME: ${{ steps.payload.outputs.requester_username }}
           PL_SLACK_CHANNEL: ${{ steps.payload.outputs.slack_channel }}
