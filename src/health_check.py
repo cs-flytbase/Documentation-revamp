@@ -19,6 +19,7 @@ this script does.
 
 Run as: python3 -m src.health_check
 """
+from src.alerts import shorten
 import base64
 import io
 import json
@@ -389,7 +390,7 @@ def build_message(results: list[Result], run_url: str = "") -> str | None:
 
 def post_slack(fetch, token: str, channel: str, text: str) -> bool:
     status, data = fetch("POST", "https://slack.com/api/chat.postMessage", {"Authorization": f"Bearer {token}"},
-                         {"channel": channel, "text": text, "unfurl_links": False}, False)
+                         {"channel": channel, "text": shorten(text), "unfurl_links": False}, False)
     return status == 200 and isinstance(data, dict) and bool(data.get("ok"))
 
 

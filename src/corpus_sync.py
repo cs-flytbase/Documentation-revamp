@@ -37,6 +37,7 @@ Usage:
 """
 from __future__ import annotations
 
+from src.alerts import shorten
 import argparse
 import base64
 import hashlib
@@ -629,7 +630,7 @@ def post_alert(text: str, token: str | None = None, channel: str | None = None, 
         print("[corpus-sync] SLACK_BOT_TOKEN is not set; alert not sent:", text)
         return False
     req = urllib.request.Request("https://slack.com/api/chat.postMessage",
-                                 data=json.dumps({"channel": channel, "text": text}).encode(),
+                                 data=json.dumps({"channel": channel, "text": shorten(text)}).encode(),
                                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"})
     try:
         with (opener or urllib.request.urlopen)(req, timeout=15) as resp:
