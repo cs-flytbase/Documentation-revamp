@@ -637,12 +637,12 @@ def test_clean_verification_makes_no_extra_calls():
 
 # ── Slack ─────────────────────────────────────────────────────────────────
 
-def test_slack_message_lists_needs_attention_and_fixes():
+def test_slack_message_is_short_the_checklist_stays_in_the_pr():
     from src.slack_notify import build_message
     msg = build_message({"docs_pr": "https://github.com/x/pull/1", "needs_attention": ["Placement unconfirmed: ..."],
                          "warnings": ["Placement unconfirmed: ...", "other"], "fixes": ["a", "b"]}, {"status": "success"}, "run")
-    assert "Needs your eyes before merging (1)" in msg and "• Placement unconfirmed" in msg
-    assert msg.count("Placement unconfirmed") == 1 and "• other" in msg
+    assert "Needs your eyes" not in msg and "Placement unconfirmed" not in msg  # checklist is in the PR only
+    assert "other" not in msg and "https://github.com/x/pull/1" in msg
     assert "Fixed 2 thing(s)" in msg
 
 

@@ -51,14 +51,8 @@ def build_message(pr: dict, status: dict | None, run_url: str) -> str | None:
         lines += ["", ":jigsaw: *Your material didn't cover these sections, so I left them off the doc page instead of inventing them:*"]
         lines += [f"  • {g}" for g in pr["doc_gaps"]]
         lines.append("  Send me the details and I'll add them to the PR.")
-    attention = list(pr.get("needs_attention") or [])
-    if attention:
-        lines += ["", f":warning: *Needs your eyes before merging ({len(attention)}).* "
-                      "I fixed what I could; these I won't guess at:"] + [f"  • {w}" for w in attention]
-        lines.append("  Same list is at the top of the PR, with a needs-attention label so nobody can pretend they missed it.")
-    others = [w for w in pr.get("warnings") or [] if w not in attention]
-    if others:
-        lines += ["", ":warning: *Check before merging:*"] + [f"  • {w}" for w in others]
+    # The review checklist lives in the PR only (needs-attention block and
+    # label). The Slack message stays short: done, and the links (2026-10-22).
     if pr.get("fixes"):
         lines += ["", f":wrench: Fixed {len(pr['fixes'])} thing(s) myself on the way. Details are in the PR, if you enjoy reading."]
     if pr.get("errors"):
