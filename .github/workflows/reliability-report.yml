@@ -1,0 +1,33 @@
+name: Reliability Report (Weekly)
+
+# Per-capability success rates for Son of Anton, from the run journal every
+# run writes (worker /journal). Posts ONE Slack message every Monday, even in
+# a quiet week, so silence never means broken. Fails only if the journal
+# cannot be read or the report cannot be posted, which is itself the alert.
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pyyaml
+      - name: Build and post the report
+        env:
+          CONTENT_TOKEN: ${{ secrets.CONTENT_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_ALERT_CHANNEL: ${{ vars.SLACK_ALERT_CHANNEL }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
+        run: python3 -m src.reliability_report

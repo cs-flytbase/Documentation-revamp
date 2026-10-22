@@ -13,6 +13,8 @@ Run as: python3 -m src.slack_run   (configuration comes from PL_* env vars)
 import json
 import os
 import re
+
+from src.run_journal import classify as classify_stage
 import sys
 import time
 import urllib.request
@@ -251,16 +253,58 @@ def main() -> int:
     write_status("failed", "material", "the run stopped before finishing")  # overwritten on success
     stage = "material"
 
+    # Run journal: each stage's outcome, sent once at the end (success or
+    # failure), so statuses match the final Needs-attention list. Never
+    # affects the run.
+    from src.run_journal import RunJournal, Timeline
+    journal = RunJournal.from_env(env)
+    timeline = Timeline()
+    facts: dict = {"attention": [], "fixes": [], "named": [], "missing_named": [], "received": [],
+                   "draft": {}, "pr_results": {}, "images": 0, "flushed": False}
+
+    def start(name: str, note: str = "") -> None:
+        timeline.mark(name)
+        progress.start(name, note)
+
+    def flush(failed_stage: str = "", reason: str = "") -> None:
+        if facts["flushed"]:
+            return
+        facts["flushed"] = True
+        try:
+            from src.run_journal import invariants, published_assets, stage_records
+            timeline.close()
+            pr = facts["pr_results"] or {}
+            fixes = list(dict.fromkeys(list(facts["fixes"]) + list(pr.get("fixes") or [])))
+            attention = list(dict.fromkeys(list(facts["attention"]) + list(pr.get("needs_attention") or [])))
+            records = stage_records(timeline, failed_stage, reason, attention, fixes, mode, facts["images"])
+            reached_publish = "publish" in timeline.order and failed_stage != "publish"
+            dropped = [m.group(1) for f in fixes for m in [re.match(r"Dropped (\S+): it is the same file", f)] if m]
+            link_problems = sum(1 for a in attention if classify_stage(a) == "links") + sum(
+                1 for w in pr.get("warnings") or [] if "link" in w.lower() or "points to" in w)
+            records += invariants(
+                named=facts["named"], missing_named=facts["missing_named"], received_files=facts["received"],
+                published_refs=published_assets(facts["draft"]), dropped=dropped, mode=mode,
+                target_section=env.get("PL_TARGET_SECTION", ""), docs_section=pr.get("docs_section", ""),
+                missing_prs=expected_prs_missing(mode, pr) if reached_publish else [],
+                link_problems=link_problems, needs_attention=len(attention), reached_publish=reached_publish,
+            )
+            stored = journal.post_all(records)
+            print(f"[journal] {stored}/{len(records)} record(s) stored for run {journal.run_id}")
+        except Exception as e:  # noqa: BLE001 - the journal must never affect a run
+            print(f"[journal] skipped ({type(e).__name__}: {e})")
+
     def fail(reason: str) -> int:
         print(f"[Slack Pipeline] FAILED at {stage}: {reason}")
         annotate(reason, title=f"Pipeline failed at {stage}")
         progress.fail(stage, reason)
         write_status("failed", stage, reason)
+        timeline.mark(stage)
+        flush(stage, reason)
         return 1
 
     try:
         # 1. Material
-        progress.start("material")
+        start("material")
         url = f"{env.get('PL_WORKER_URL', '')}/content?key={env.get('PL_CONTENT_KEY', '')}"
         try:
             # The worker serves stored material only with the shared token.
@@ -276,17 +320,18 @@ def main() -> int:
 
         # 2. Assets
         stage = "assets"
-        progress.start("assets")
+        start("assets")
         bundle_dir = Path(f"input_bundles/{feature_name}")
         bundle_dir.mkdir(parents=True, exist_ok=True)
         if m["video_link"]:
             (bundle_dir / "youtube_link.txt").write_text(m["video_link"])
-        failed_downloads = []
+        failed_downloads, failed_files = [], set()
         for a in m["assets"]:
             err = download(a["url"], token, bundle_dir / a["file"])
             print(f"  {'Downloaded' if not err else 'FAILED'}: {a['file']}{'' if not err else ' - ' + err}")
             if err:
                 failed_downloads.append(f"{a['original']} ({err})")
+                failed_files.add(a["file"])
         got = len(m["assets"]) - len(failed_downloads)
         # Files the material names that never arrived (Slack takes 10 files per
         # message; the rest of a batch is easy to lose). Flagged, never fatal.
@@ -297,6 +342,10 @@ def main() -> int:
             attention.append(f"The material names {len(missing)} file(s) that were never received: "
                              + ", ".join(missing[:12]) + (" ..." if len(missing) > 12 else "")
                              + ". Send them in the thread and ask for a re-run, or remove them from the material.")
+        from src.assets import named_media
+        facts.update(attention=attention, named=named_media(m["content"]), missing_named=missing,
+                     received=[a["file"] for a in m["assets"] if a["file"] not in failed_files],
+                     images=sum(1 for a in m["assets"] if a["kind"] != "video"))
         if failed_downloads:
             attention.append("Could not download from Slack: " + "; ".join(failed_downloads)
                              + ". Re-share those files and ask for a re-run.")
@@ -307,7 +356,7 @@ def main() -> int:
 
         # 3. Source document
         stage = "source"
-        progress.start("source")
+        start("source")
         from src.agents.source import SourceAgent
         src = SourceAgent().build_pm_doc(content=m["content"], comments=m["comments"], reference_link=m["reference_link"])
         if src.get("error"):
@@ -322,7 +371,7 @@ def main() -> int:
         def on_stage(name):
             nonlocal stage
             stage = name
-            progress.start(name)
+            start(name)
 
         from src.orchestrator import run_pipeline
         result = run_pipeline(
@@ -337,6 +386,8 @@ def main() -> int:
         pr_results = result.get("pr_results") or {}
         errors = list(pr_results.get("errors") or []) + list(result.get("errors") or [])
         draft = result.get("draft") or {}
+        facts.update(pr_results=pr_results, draft=draft, fixes=list(result.get("fixes") or []),
+                     attention=list(dict.fromkeys(list(result.get("attention") or []) + attention)))
         # What a person must check, from every stage, for the Slack message.
         if not pr_results.get("needs_attention"):
             pr_results["needs_attention"] = list(dict.fromkeys(list(result.get("attention") or []) + attention))
@@ -357,6 +408,7 @@ def main() -> int:
 
         progress.finish()
         write_status("success")
+        flush()
         return 0
     except Exception as e:  # noqa: BLE001 - reported with its stage, then re-raised for the traceback
         fail(f"{type(e).__name__}: {e}")
