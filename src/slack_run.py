@@ -101,10 +101,14 @@ def build_material(kv: dict) -> dict:
     for a in assets:
         by_original.setdefault(a["original"], []).append(a["file"])
     audience = {}
+    excluded = set()
     for original, aud in (intake.get("asset_audience") or {}).items():
         if aud in ("release", "doc", "both"):
             for f in by_original.get(original, []):
                 audience[f] = aud
+        elif aud == "none":  # the requester said the file is not needed
+            excluded.update(by_original.get(original, []))
+    assets = [a for a in assets if a["file"] not in excluded]
     return {
         "content": "\n\n".join(p for p in parts if p),
         # What file-name checks read: the text files and the original request,

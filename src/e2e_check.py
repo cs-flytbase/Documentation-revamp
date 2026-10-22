@@ -160,7 +160,8 @@ def missing_attention(md: str, received: list[str]) -> list[str]:
 
 
 def run_check(api, run_pipeline, tag: str, fixture: Path = FIXTURE, keep: bool = False,
-              target_section: str = TARGET_SECTION, summary_path: str = "SUMMARY.md") -> tuple[list[Result], dict]:
+              target_section: str = TARGET_SECTION, summary_path: str = "SUMMARY.md",
+              source=None) -> tuple[list[Result], dict]:
     """Run the pipeline in sandbox `tag`, check what landed, clean up.
     Returns (results, pipeline result). Never raises."""
     md, files = fixture_material(fixture)
@@ -175,6 +176,15 @@ def run_check(api, run_pipeline, tag: str, fixture: Path = FIXTURE, keep: bool =
         bundle = workdir / FEATURE_NAME
         shutil.copytree(fixture, bundle)
         attention = missing_attention(md, files)
+        # The Source Agent stage, exactly as slack_run.py runs it. Skipping it
+        # is how a broken import in that stage went unnoticed (2026-10-22).
+        if source is not None:
+            src = source(md)
+            if src.get("error"):
+                results.append(Result("source agent", False, str(src["error"])[:300]))
+                return results, outcome
+            (bundle / "pm_doc.md").write_text(src["pm_doc"])
+            results.append(Result("source agent", True, "ok"))
         outcome = run_pipeline(str(bundle), mode="both", target_section=target_section,
                                asset_audience=audience_for(files), attention=attention, doc_scope="cloud") or {}
         pr = outcome.get("pr_results") or {}
@@ -295,10 +305,14 @@ def main(argv=None) -> int:
     if not token:
         return report([Result("configuration", False, "GITHUB_TOKEN is not set")], started=started)
     try:
+        from src.agents.source import SourceAgent
         from src.orchestrator import run_pipeline
     except Exception as e:  # noqa: BLE001
         return report([Result("pipeline import", False, f"{e!r}")], started=started)
-    results, _ = run_check(GitHubAPI(token), run_pipeline, tag, keep="--keep" in argv)
+
+    def source(md):
+        return SourceAgent().build_pm_doc(content=md, comments=md[:500], reference_link="")
+    results, _ = run_check(GitHubAPI(token), run_pipeline, tag, keep="--keep" in argv, source=source)
     return report(results, started=started)
 
 
