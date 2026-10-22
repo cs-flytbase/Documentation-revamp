@@ -223,9 +223,22 @@ def title_case(text: str) -> str:
     return " ".join(out)
 
 
+# Alt text is one short sentence of what the image shows. The full vision
+# description (with values read off the screen) stays drafting context; on
+# the page it read as claims and the fact-checker flagged every one of them
+# (2026-10-22, Terrain Aware Grid PRs).
+ALT_MAX_WORDS = 15
+
+
 def _alt(text, file):
     alt = " ".join(str(text or Path(file).stem.replace("-", " ").replace("_", " ")).split())
-    return alt.replace("[", "(").replace("]", ")")
+    alt = re.split(r"(?<=[.!?])\s+", alt, maxsplit=1)[0]
+    # Only the lead clause: lists of values read off the screen follow a comma.
+    alt = re.split(r"\s*[,;:(]\s*|\s+-\s+", alt, maxsplit=1)[0]
+    words = alt.split()
+    if len(words) > ALT_MAX_WORDS:
+        alt = " ".join(words[:ALT_MAX_WORDS]).rstrip(",;:")
+    return alt.rstrip(".").replace("[", "(").replace("]", ")")
 
 
 def _procedures(data: dict) -> list[dict]:

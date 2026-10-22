@@ -273,6 +273,9 @@ class DraftingAgent(BaseAgent):
         fact_check: list[str] | None = None,
     ) -> dict:
         descs = {v.get("file_name", ""): v.get("description", "") for v in (vision_output or [])}
+        # Alt text on the page: the short alt_text, not the full description,
+        # which stays in the drafting context below.
+        alts = {v.get("file_name", ""): (v.get("alt_text") or v.get("description", "")) for v in (vision_output or [])}
         doc_assets, rel_required, rel_optional = route_assets(asset_filenames, asset_audience)
         # One page of a subsections run sees every asset of the run but should
         # use only those that show its own feature. Nothing is required of it;
@@ -362,12 +365,12 @@ Use only the assets relevant to this scope.
         style_report, gaps = {}, []
         doc_result, release_result = {}, {}
         if doc_fields:
-            doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, descs, place_leftovers=whole_run)
+            doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, alts, place_leftovers=whole_run)
             doc_result, issues = self._style_pass("doc", doc_result)
             if style_errors(issues):
                 doc_fields = self._retry_fields(DOC_PAGE_PROMPT, doc_msg, doc_fields,
                                                 [f"style: {i.message}" for i in style_errors(issues)], "doc page style")
-                doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, descs, place_leftovers=whole_run)
+                doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, alts, place_leftovers=whole_run)
                 doc_result, issues = self._style_pass("doc", doc_result)
             if issues:
                 style_report["doc_page"] = [f"[{i.severity}] {i}" for i in issues][:15]
@@ -378,13 +381,13 @@ Use only the assets relevant to this scope.
 
         if release_fields:
             doc_title = self._h1(doc_result.get("content", "")) if doc_result else ""
-            release_result = render_release(release_fields, rel_required, youtube_link, doc_title, descs,
+            release_result = render_release(release_fields, rel_required, youtube_link, doc_title, alts,
                                             feature_flag, rel_optional)
             release_result, issues = self._style_pass("release", release_result)
             if style_errors(issues):
                 release_fields = self._retry_fields(RELEASE_NOTE_PROMPT, release_msg, release_fields,
                                                     [f"style: {i.message}" for i in style_errors(issues)], "release note style")
-                release_result = render_release(release_fields, rel_required, youtube_link, doc_title, descs,
+                release_result = render_release(release_fields, rel_required, youtube_link, doc_title, alts,
                                                 feature_flag, rel_optional)
                 release_result, issues = self._style_pass("release", release_result)
             if issues:

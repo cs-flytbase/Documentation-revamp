@@ -133,8 +133,9 @@ def _clean(text) -> str:
 
 
 def _alt(text: str, file: str) -> str:
-    alt = " ".join(str(text or Path(file).stem.replace("-", " ").replace("_", " ")).split())
-    return alt.replace("[", "(").replace("]", ")")
+    """Same rule as the doc page: one short sentence (src/doc_template._alt)."""
+    from src.doc_template import _alt as doc_alt
+    return doc_alt(text, file)
 
 
 def check_fields(data: dict, required_assets: list[str], optional_assets: list[str] = (),
