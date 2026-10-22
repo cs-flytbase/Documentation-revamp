@@ -21,6 +21,12 @@ MIN_TOKENS = 6          # shorter sentences ("Off by default.") repeat legitimat
 SIMILARITY = 0.75       # Dice overlap of the content words of two sentences
 MAX_PROBLEMS = 10       # keep the retry prompt focused
 
+# Which section keeps a repeated number: thresholds, timings and limits are
+# rules, so Expected Behavior first; the rest refer to it.
+QUANTITY_HOMES = ("Expected Behavior", "Operating Constraints", "Controls and Indicators", "Edge Cases",
+                  "System Messages", "Procedures", "Prerequisites", "Frequently Asked Questions",
+                  "After Completion", "Overview")
+
 _STOP = {"a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "if", "in", "is", "it", "its", "of",
          "on", "or", "that", "the", "their", "then", "this", "to", "when", "with", "you", "your"}
 _UNITS = (r"km/h|m/s|mph|km|ms|m|ft|seconds?|secs?|s|minutes?|mins?|hours?|h|%|°C|°F|MB|GB|KB|fps|Mbps|Hz|px")
@@ -97,8 +103,10 @@ def redundancy_problems(data: dict) -> list[str]:
         problems.append(f'the same fact is in "{a}" and "{b}": "{s[:90]}". Keep it only in its home section '
                         "and remove it from the other (refer to the home section if needed)")
     for q, names in repeated_quantities(sections).items():
-        problems.append(f'"{q}" is stated in {", ".join(names)}. State it once, in its home section; '
-                        "elsewhere refer to that section")
+        home = next((h for h in QUANTITY_HOMES if h in names), names[0])
+        others = [n for n in names if n != home]
+        problems.append(f'"{q}" is stated in {", ".join(names)}. Keep it ONLY in {home}. In {", ".join(others)}, '
+                        f'remove the number and refer to it instead (e.g. "within the warning distance, see {home}")')
     for forms in label_variants(sections):
         problems.append(f"the same label is written differently: {' / '.join(f'**{f}**' for f in forms)}. "
                         "Use the exact on-screen label everywhere")
