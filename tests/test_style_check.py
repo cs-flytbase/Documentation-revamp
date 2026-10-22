@@ -83,3 +83,13 @@ def test_only_feedback_newer_than_the_migration_reaches_the_prompt(tmp_path):
 
 def test_no_pending_feedback_means_no_block(tmp_path):
     assert feedback_block(tmp_path) == ""
+
+
+def test_doc_pages_ban_selling_words_and_uk_spelling_but_release_notes_do_not():
+    from src.style_check import lint
+    text = "Simply pick a colour. The behaviour is easy to check.\n\nClick **Colour settings**."
+    doc = [i.message for i in lint(text, "doc")]
+    assert any('remove "Simply"' in m for m in doc)
+    assert any('"colour" -> "color"' in m for m in doc) and any('"behaviour" -> "behavior"' in m for m in doc)
+    assert not any("Colour settings" in m or '"Colour"' in m for m in doc)  # on-screen label kept
+    assert not any("US English" in m or "doc pages state facts" in m for m in [i.message for i in lint(text, "release")])

@@ -21,7 +21,7 @@ MAX_RULES = 15
 STYLE_RULES = [
     "Write plain technical English (ASD-STE100 style): short sentences, active voice, concrete terms.",
     "No storytelling hooks, no build-up, no hype words. Persuade only with concrete facts.",
-    'Address the reader as "you". Refer to the company as "FlytBase", never "we", "our" or "us".',
+    'Refer to the company as "FlytBase", never "we", "our" or "us". Who is addressed is set by the TONE above.',
     "Use only facts from the source material. Never invent a number, limit, capability, setting, link or date.",
     "State limitations plainly. Do not soften or hide them.",
     "Use the exact on-screen labels in bold (**Video overlays**). Show navigation with >: **Settings > Telemetry**.",
@@ -37,7 +37,6 @@ assert len(STYLE_RULES) <= MAX_RULES, "The style guide is capped. Merge or repla
 
 # Rules that only make sense for doc pages (the full technical reference).
 DOC_PAGE_RULES = [
-    'Constraints tables use the column headers "Components" and "Details".',
     "Whenever hardware compatibility is mentioned, add a sentence linking to the hardware compatibility page.",
     "Place the page in the section of the information architecture it belongs to; never duplicate a page that exists.",
     "ON-PREMISE PAGES ONLY (paths under on-premise/): every page in Installation, System and Organization "
@@ -54,8 +53,9 @@ TONE = {
     "release": "TONE: professional and enterprise-grade (aerospace and SaaS). Read by executives, marketing, operators "
                "and developers at once: lead each section with the outcome in plain language, then how it works, with "
                "technical specifics in the capability descriptions. Third person by role, never \"you\". Concrete, never hype.",
-    "doc": "TONE: a technical reference, not marketing. Neutral, precise and concise: what an operator needs, said once. Every section must make "
-           "sense on its own, because it is often read by an LLM answering a single question.",
+    "doc": "TONE: the absolute truth on how to use the feature, for pilots, operators, admins and integrators. Neutral and "
+           "factual, never persuasive. The system is the subject; address the reader only in procedure steps. Complete, but "
+           "every fact said once. Every section must make sense on its own, because an LLM often reads just one. US English.",
 }
 
 

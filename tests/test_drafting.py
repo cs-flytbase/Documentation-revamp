@@ -25,10 +25,9 @@ RELEASE = {
 DOC = {
     "filename": "video-overlays.md", "target_path": "in-flight-modules", "title": "Video Overlays",
     "description": "Overlays on the live video.", "overview": "Overlays draw zones on the video.",
-    "problem_statement": "Zones were only on the map.",
     "navigation": ["**Video overlays**"],
-    "interface_reference": [{"element": "**Video overlays**", "what_it_does": "opens panel"}],
-    "how_to": [{"task": "Open Overlays", "steps": [
+    "controls_and_indicators": [{"name": "**Video overlays**", "description": "Opens the overlay panel."}],
+    "procedures": [{"task": "Open Overlays", "steps": [
         {"text": "**Click** **Video overlays**.", "asset": "01-open-panel.png"},
         {"text": "**Look** at the video.", "asset": "02-zone-overlays.gif"}]}],
     "section_assets": {"overview": ["hero.gif"]},
@@ -58,8 +57,8 @@ def test_both_outputs_from_one_source_in_their_own_templates():
     agent, calls = _agent([RELEASE, DOC])
     out = _draft(agent)
     rn, dp = out["release_note"]["content"], out["doc_page"]["content"]
-    assert "## Key Benefits" in rn and "## How To" not in rn
-    assert "## How To" in dp and "## Key Benefits" not in dp
+    assert "## Key Benefits" in rn and "## Procedures" not in rn
+    assert "## Procedures" in dp and "## Key Benefits" not in dp
     assert rn.splitlines()[2] == dp.splitlines()[2] == '{% embed url="https://youtu.be/v" %}'  # video first in both
     assert "—" not in rn  # auto-fixed
     assert "[Video Overlays]({{DOC_PAGE_URL}})" in rn
@@ -70,7 +69,7 @@ def test_both_outputs_from_one_source_in_their_own_templates():
 def test_doc_gaps_are_reported_not_invented():
     agent, _ = _agent([RELEASE, DOC])
     gaps = _draft(agent)["_doc_gaps"]
-    assert "Troubleshooting" in gaps and "Prerequisites" in gaps
+    assert "Frequently Asked Questions" in gaps and "Prerequisites" in gaps
 
 
 def test_each_output_gets_its_own_prompt_and_rules():
@@ -78,7 +77,7 @@ def test_each_output_gets_its_own_prompt_and_rules():
     _draft(agent)
     rel, doc = calls
     assert "RELEASE NOTE" in rel["system"] and "DOC PAGE" in doc["system"]
-    assert "TONE: professional and enterprise-grade" in rel["message"] and "TONE: a technical reference" in doc["message"]
+    assert "TONE: professional and enterprise-grade" in rel["message"] and "TONE: the absolute truth on how to use the feature" in doc["message"]
     assert "--- MEMORY FILES ---" not in rel["message"] + doc["message"]
     assert "treat release notes as storytelling" not in (rel["message"] + doc["message"]).lower()
 
@@ -112,7 +111,7 @@ def test_feature_flag_adds_access_only_when_given():
 
 def test_field_problems_get_one_targeted_retry():
     forgot = json.loads(json.dumps(DOC))
-    forgot["how_to"][0]["steps"][1]["asset"] = ""
+    forgot["procedures"][0]["steps"][1]["asset"] = ""
     agent, calls = _agent([RELEASE, forgot, DOC])
     _draft(agent)
     assert len(calls) == 3
@@ -156,7 +155,7 @@ def _zone_doc():
     doc = json.loads(json.dumps(DOC))
     doc["title"] = "Zone Overlays"
     doc["section_assets"] = {"overview": ["zone-overlays.gif"]}
-    doc["how_to"] = [{"task": "Show Zones", "steps": [
+    doc["procedures"] = [{"task": "Show Zones", "steps": [
         {"text": "**Click** **Video overlays**.", "asset": "zone-overlays-01-video-overlays-panel.png"}]}]
     return doc
 
@@ -166,7 +165,7 @@ def test_a_subsection_page_is_not_forced_to_use_other_features_images():
     out = agent.draft("## Zone Overlays\nZones.", {}, [], COCKPIT_ASSETS, mode="doc_only", subsection_focus=FOCUS)
     page = out["doc_page"]["content"]
     assert len(calls) == 1  # no retry demanding the Live Annotation images
-    assert "live-annotation" not in page  # nothing dumped at the end of How To
+    assert "live-annotation" not in page  # nothing dumped at the end of Procedures
     assert page.count("](assets/zone-overlays") == 2
     assert "Use ONLY the ones that show this subsection" in calls[0]["message"]
 

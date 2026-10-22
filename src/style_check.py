@@ -159,6 +159,19 @@ def lint(text: str, kind: str = "doc", rules: dict | None = None) -> list[Issue]
             issues.append(Issue("banned_phrase", "error", _line_of(masked, m.start()),
                                 f'remove marketing/storytelling phrase "{text[m.start():m.end()]}"'))
 
+    if kind == "doc":
+        for item in rules.get("doc_banned_phrases", []):
+            phrase = item["phrase"].lower()
+            for m in re.finditer(rf"(?<![a-z]){re.escape(phrase)}(?![a-z])", lower):
+                issues.append(Issue("doc_banned_phrase", "error", _line_of(masked, m.start()),
+                                    f'doc pages state facts: remove "{text[m.start():m.end()]}"'))
+        for item in rules.get("uk_spellings", []):
+            for m in re.finditer(rf"(?<![A-Za-z]){re.escape(item['wrong'])}(?![A-Za-z])", masked, re.I):
+                if "**" in masked[max(0, m.start() - 40):m.start()] and "**" in masked[m.end():m.end() + 40]:
+                    continue  # inside a bold on-screen label: keep the label as it is
+                issues.append(Issue("us_spelling", "error", _line_of(masked, m.start()),
+                                    f'US English: "{m.group(0)}" -> "{item["right"]}"'))
+
     for claim in rules.get("forbidden_claims", []):
         for m in re.finditer(claim["pattern"], masked):
             issues.append(Issue("forbidden_claim", "error", _line_of(masked, m.start()),
