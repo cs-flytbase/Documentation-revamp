@@ -16,11 +16,11 @@ RELEASE = {
     "problem": "Pilots had to compare the video with the map — constantly.",
     "introduction": "Zones are now drawn on the live video.",
     "capabilities": [{"name": "Zone Overlays", "description": "NFZs and geofence on the video.", "asset": ""}],
-    "why_it_matters": [{"benefit": "One screen", "detail": "No map switching."},
+    "key_benefits": [{"benefit": "One screen", "detail": "No map switching."},
                        {"benefit": "Fewer mistakes", "detail": "Zones are where the pilot is looking."}],
-    "who_its_for": [{"audience": "Pilots", "value": "Stay clear of NFZs."}],
-    "key_takeaways": ["Zones on video.", "Less switching."],
-    "hero_asset": "hero.gif", "access": "",
+    "intended_users": [{"audience": "Pilots", "value": "Stay clear of NFZs."}],
+    "summary": ["Zones on video.", "Less switching."],
+    "hero_asset": "hero.gif", "availability": "",
 }
 DOC = {
     "filename": "video-overlays.md", "target_path": "in-flight-modules", "title": "Video Overlays",
@@ -58,8 +58,8 @@ def test_both_outputs_from_one_source_in_their_own_templates():
     agent, calls = _agent([RELEASE, DOC])
     out = _draft(agent)
     rn, dp = out["release_note"]["content"], out["doc_page"]["content"]
-    assert "## Why It Matters" in rn and "## How To" not in rn
-    assert "## How To" in dp and "## Why It Matters" not in dp
+    assert "## Key Benefits" in rn and "## How To" not in rn
+    assert "## How To" in dp and "## Key Benefits" not in dp
     assert rn.splitlines()[2] == dp.splitlines()[2] == '{% embed url="https://youtu.be/v" %}'  # video first in both
     assert "—" not in rn  # auto-fixed
     assert "[Video Overlays]({{DOC_PAGE_URL}})" in rn
@@ -78,7 +78,7 @@ def test_each_output_gets_its_own_prompt_and_rules():
     _draft(agent)
     rel, doc = calls
     assert "RELEASE NOTE" in rel["system"] and "DOC PAGE" in doc["system"]
-    assert "TONE: a marketable note" in rel["message"] and "TONE: a technical reference" in doc["message"]
+    assert "TONE: professional and enterprise-grade" in rel["message"] and "TONE: a technical reference" in doc["message"]
     assert "--- MEMORY FILES ---" not in rel["message"] + doc["message"]
     assert "treat release notes as storytelling" not in (rel["message"] + doc["message"]).lower()
 
@@ -104,10 +104,10 @@ def test_release_only_image_stays_off_the_doc_page():
 def test_feature_flag_adds_access_only_when_given():
     agent, calls = _agent([RELEASE, DOC])
     out = _draft(agent, feature_flag="video_overlays")
-    assert "## Access" in out["release_note"]["content"] and "`video_overlays`" in out["release_note"]["content"]
+    assert "## Availability" in out["release_note"]["content"] and "`video_overlays`" in out["release_note"]["content"]
     assert "behind the `video_overlays` feature flag" in calls[0]["message"]
     agent, _ = _agent([RELEASE, DOC])
-    assert "## Access" not in _draft(agent)["release_note"]["content"]
+    assert "## Availability" not in _draft(agent)["release_note"]["content"]
 
 
 def test_field_problems_get_one_targeted_retry():
