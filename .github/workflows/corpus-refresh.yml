@@ -1,25 +1,36 @@
-name: Corpus Refresh (Weekly)
+name: Corpus Refresh (Daily)
+
+# Keeps the Pinecone index in step with the docs and releases repos.
+# It used to crawl the websites, which answer bots with 429; from July to
+# October 2026 it reported green every week while adding nothing. It now
+# reads the Markdown from GitHub (src/corpus_sync.py), re-embeds only pages
+# whose content changed, and alerts Slack when anything goes wrong.
 
 on:
   schedule:
-    # Every Sunday at 12:00 PM UTC
-    - cron: '0 12 * * 0'
+    - cron: '0 3 * * *'   # daily, 03:00 UTC
   workflow_dispatch:
     inputs:
       source:
-        description: 'Which source to refresh (all, docs, releases)'
+        description: 'Which repo to sync'
         required: false
         default: 'all'
         type: choice
-        options:
-          - all
-          - docs
-          - releases
-      full_rescrape:
-        description: 'Force full re-scrape (not incremental)?'
+        options: [all, docs, releases]
+      dry_run:
+        description: 'Report what would change without writing to the index'
         required: false
         default: false
         type: boolean
+      remove_legacy:
+        description: 'One-time: after a clean sync, remove the old website crawler vectors'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: corpus-refresh
+  cancel-in-progress: false
 
 jobs:
   refresh-corpus:
@@ -39,33 +50,23 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Create .env from secrets
+      - name: Sync the corpus from GitHub
+        env:
+          CORPUS_GITHUB_TOKEN: ${{ secrets.FLYTBASE_GITHUB_TOKEN }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_ALERT_CHANNEL: ${{ vars.SLACK_ALERT_CHANNEL }}
+          SOURCE: ${{ inputs.source || 'all' }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+          REMOVE_LEGACY: ${{ inputs.remove_legacy && '--remove-legacy' || '' }}
         run: |
-          cat > .env << ENVEOF
-          PINECONE_API_KEY=${{ secrets.PINECONE_API_KEY }}
-          PINECONE_INDEX_NAME=flytbase-docs
-          OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
-          OPENAI_BASE_URL=https://openrouter.ai/api/v1
-          LLM_PROVIDER=openai
-          ENVEOF
+          python -m src.corpus_sync --source "$SOURCE" $DRY_RUN $REMOVE_LEGACY
 
-      - name: Set source parameter
-        id: params
+      - name: Alert if the job crashed before it could report
+        if: failure()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_ALERT_CHANNEL: ${{ vars.SLACK_ALERT_CHANNEL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "source=${{ inputs.source }}" >> $GITHUB_OUTPUT
-            echo "full=${{ inputs.full_rescrape }}" >> $GITHUB_OUTPUT
-          else
-            echo "source=all" >> $GITHUB_OUTPUT
-            echo "full=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Run corpus refresh
-        run: |
-          if [ "${{ steps.params.outputs.full }}" = "true" ]; then
-            echo "Running FULL re-scrape..."
-            python -m src.ingest --source ${{ steps.params.outputs.source }}
-          else
-            echo "Running incremental refresh..."
-            python -m src.ingest --refresh --source ${{ steps.params.outputs.source }}
-          fi
+          python -m src.corpus_sync --alert "Corpus refresh failed before it could report. The knowledge index may be stale. Run $RUN_URL"
