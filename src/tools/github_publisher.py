@@ -2,6 +2,14 @@
 
 Creates a branch, writes new files, patches impacted pages, opens a PR.
 
+Atomic publishing (P1, 2026-10-22): every file for a repo (pages, SUMMARY.md,
+assets, impacted-page patches) is staged in memory and lands in ONE commit
+through the git data API. The branch exists only once that commit exists, so
+a failure never leaves a half-written branch, and a branch this run created
+that ends without a PR is deleted. The docs repo is published first; the
+release note links to where the doc page actually landed, or says
+"Documentation: coming soon" when there is no doc PR. It never links a 404.
+
 Usage:
     from src.tools.github_publisher import publish_pr
     result = publish_pr(pipeline_output_dir="output/run_xxx", draft_result=draft_result)
@@ -18,7 +26,7 @@ import requests
 from src.config import GITHUB_TOKEN
 from src.diag import report_exception
 from src.link_check import check_page, repair_links
-from src.release_template import docs_url, finalize_doc_link
+from src.release_template import DOC_LINK_PLACEHOLDER, docs_url, finalize_doc_link
 from src.summary_placement import (
     add_group, insert_entries, insert_entry, nearest_ancestor, relative_to_summary, repo_path_for, resolve_exact,
     resolve_section, validate_insert,
@@ -32,6 +40,27 @@ _NET_ERRORS = tuple(getattr(requests, n) for n in ("ConnectionError", "Timeout")
 DOCS_REPO = "FlytBaseAILabs/flytbase-docs"
 RELEASES_REPO = "FlytBaseAILabs/flytbase-releases"
 BASE_BRANCH = "main"
+DOCS_COMING_SOON = "Documentation: coming soon."
+
+
+class _Stage:
+    """Files for one repo's run branch, held until a single commit."""
+
+    def __init__(self, branch: str, base: str, existed: bool):
+        self.branch = branch
+        self.base = base            # commit the run's reads were made against
+        self.existed = existed      # the branch was there before this run (a re-run)
+        self.created = False        # this run created the branch
+        self.files: dict[str, str | bytes] = {}
+
+
+class PublishError(Exception):
+    """A repo could not be published; the message says why, for Slack."""
+
+
+def _coming_soon(content: str) -> str:
+    """The release note's doc-link line, when there is no doc page to link."""
+    return "\n".join(DOCS_COMING_SOON if DOC_LINK_PLACEHOLDER in line else line for line in content.split("\n"))
 
 
 def _sanitize_target_path(raw: str) -> str:
@@ -67,6 +96,7 @@ class GitHubPublisher:
         self.scope = doc_scope
         self._written: dict[str, set] = {}      # repo -> paths written on this run's branch
         self._tree_cache: dict[str, set] = {}   # repo -> paths on main
+        self._stages: dict[str, _Stage] = {}    # repo -> files waiting for the single commit
         self._sleep = time.sleep
         self.session = requests.Session()
         self.session.headers.update({
@@ -118,8 +148,96 @@ class GitHubPublisher:
                 raise
             print(f"    Branch {branch} already exists in {repo}; reusing it")
 
+    def _begin(self, repo: str, branch: str) -> None:
+        """Start staging a repo's files for `branch`. Nothing is written yet.
+
+        A re-run finds the branch already there and builds on it; otherwise the
+        run reads main and the branch is created by the commit itself.
+        """
+        main_sha = self._get_branch_sha(repo, BASE_BRANCH)
+        try:
+            head, existed = self._get_branch_sha(repo, branch), True
+        except requests.HTTPError as e:
+            if getattr(getattr(e, "response", None), "status_code", None) != 404:
+                raise
+            head, existed = main_sha, False
+        self._stages[repo] = _Stage(branch, head, existed)
+
+    def _commit(self, repo: str, message: str, attention: list) -> None:
+        """Commit every staged file for `repo` in one commit, creating or
+        fast-forwarding the run branch. A file whose blob cannot be created
+        (after the API's own retries) is left out and listed under Needs
+        attention; the rest still lands. The commit is retried once from a
+        fresh base. Raises PublishError if nothing could be committed."""
+        st = self._stages[repo]
+        if not st.files:
+            raise PublishError(f"nothing was staged for {repo}")
+        tree = []
+        for path, content in st.files.items():
+            data = content if isinstance(content, bytes) else content.encode("utf-8")
+            try:
+                blob = self._api("POST", repo, "git/blobs", json={
+                    "content": base64.b64encode(data).decode("ascii"), "encoding": "base64"})
+                tree.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+            except Exception as e:  # noqa: BLE001 - one bad file must not sink the PR
+                attention.append(f"`{path}` could not be uploaded and is not in this PR: "
+                                 f"{report_exception(f'Blob for {path}', e)}. Add it by hand.")
+                self._written.get(repo, set()).discard(path)
+        if not tree:
+            raise PublishError(f"no file could be uploaded to {repo}")
+        last = None
+        for attempt in range(2):
+            try:
+                if attempt and st.existed:  # fresh base: the branch may have moved
+                    st.base = self._get_branch_sha(repo, st.branch)
+                base_tree = self._api("GET", repo, f"git/commits/{st.base}")["tree"]["sha"]
+                new_tree = self._api("POST", repo, "git/trees", json={"base_tree": base_tree, "tree": tree})
+                commit = self._api("POST", repo, "git/commits", json={
+                    "message": message, "tree": new_tree["sha"], "parents": [st.base]})
+                if st.existed:
+                    self._api("PATCH", repo, f"git/refs/heads/{st.branch}", json={"sha": commit["sha"], "force": False})
+                else:
+                    try:
+                        self._api("POST", repo, "git/refs", json={"ref": f"refs/heads/{st.branch}", "sha": commit["sha"]})
+                        st.created = True
+                    except requests.HTTPError as e:
+                        if getattr(getattr(e, "response", None), "status_code", None) != 422:
+                            raise
+                        st.existed = True  # created meanwhile: build on it next attempt
+                        raise
+                st.existed = True
+                st.base = commit["sha"]
+                st.files.clear()
+                return
+            except Exception as e:  # noqa: BLE001
+                last = e
+                print(f"    Commit to {repo} failed (attempt {attempt + 1}): {e}")
+        raise PublishError(f"could not commit to {repo} after a retry: {report_exception(f'Commit to {repo}', last)}")
+
+    def _discard(self, repo: str) -> None:
+        """Delete the run branch if this run created it and it has no PR."""
+        st = self._stages.pop(repo, None)
+        if not st or not st.created:
+            return
+        try:
+            self._api("DELETE", repo, f"git/refs/heads/{st.branch}")
+            print(f"    Deleted {st.branch} in {repo}: it ended without a PR")
+        except Exception as e:  # noqa: BLE001
+            print(f"    Could not delete {st.branch} in {repo}: {e}")
+
     def _get_file(self, repo: str, file_path: str, branch: str) -> tuple[str, str] | tuple[None, None]:
-        """Fetch file content and its SHA from GitHub. Returns (content, sha) or (None, None)."""
+        """Fetch file content and its SHA from GitHub. Returns (content, sha) or (None, None).
+
+        On a staged run branch, a file staged by this run is returned as it
+        will be committed; a branch that does not exist yet reads from main.
+        """
+        st = self._stages.get(repo)
+        if st and branch == st.branch:
+            if file_path in st.files:
+                v = st.files[file_path]
+                return (v.decode("utf-8", "replace") if isinstance(v, bytes) else v), "staged"
+            if not st.existed:
+                branch = BASE_BRANCH
         try:
             data = self._api("GET", repo, f"contents/{file_path}", params={"ref": branch})
             content = base64.b64decode(data["content"]).decode("utf-8")
@@ -137,6 +255,11 @@ class GitHubPublisher:
         up so the write updates it instead of failing with 422.
         """
         assert_in_scope(self.scope, file_path, repo)
+        st = self._stages.get(repo)
+        if st and branch == st.branch:
+            st.files[file_path] = content
+            self._written.setdefault(repo, set()).add(file_path)
+            return
         if not existing_sha:
             _, existing_sha = self._get_file(repo, file_path, branch)
         payload = {
@@ -314,6 +437,12 @@ class GitHubPublisher:
                 if is_gif and hasattr(self, '_asset_cache'):
                     self._asset_cache[asset_path] = content_bytes
 
+            # Staged run: the bytes go into the single commit with everything else.
+            st = self._stages.get(repo)
+            if st and branch == st.branch:
+                st.files[f"{target_path}/{asset_name}"] = content_bytes
+                return None
+
             # Step 2: GIFs always use Blobs API — binary files are unreliable via Contents API
             if is_gif:
                 print(f"    Using Blobs API for GIF {asset_name} ({len(content_bytes) / 1024 / 1024:.1f}MB)...")
@@ -475,20 +604,6 @@ class GitHubPublisher:
         notes.append("No existing sidebar section fits this page, so it is NOT in the sidebar yet. Tell Son of Anton "
                      "which section it belongs under and it will move it (move_page) before merging.")
         return None, text, sha, False, notes
-
-    def _planned_doc_path(self, target_section: str, doc_page: dict, parent_slug: str = "", child_slug: str = "",
-                          guess_label: str = "") -> str | None:
-        """Where the docs side will put this doc page, using the same placement
-        rules, so a release note can link to it before the docs PR exists."""
-        if not doc_page or not doc_page.get("content"):
-            return None
-        guessed = _sanitize_target_path(doc_page.get("target_path", ""))
-        placement = self._resolve_placement(DOCS_REPO, BASE_BRANCH, target_section, guessed, {}, guess_label)[0]
-        folder = placement.folder if placement else ""
-        if parent_slug:
-            return f"{repo_path_for(folder, parent_slug, self.scope.summary_path)}/{child_slug}.md"
-        filename = Path(doc_page.get("filename", "doc.md")).name
-        return repo_path_for(folder, filename, self.scope.summary_path)
 
     def _write_summary_entry(self, branch: str, placement, summary_text: str, summary_sha: str, updated: str,
                              message: str, attention: list) -> None:
@@ -948,96 +1063,24 @@ class GitHubPublisher:
                 except Exception as e:  # noqa: BLE001
                     att.append(f"Cross-link to {url} not added: {report_exception(f'Failed to patch {url}', e)}")
 
-        release_file = None  # (path, planned doc path) for the link check after the docs side lands
+        def doc_link(content: str, doc_path: str | None, has_doc: bool) -> str:
+            """The release note's link to its doc page: where the page actually
+            landed (the docs repo is published first), or "coming soon" when a
+            doc page was expected but has no PR. Never a URL that would 404."""
+            if doc_path:
+                return finalize_doc_link(content, docs_url(doc_path))
+            if mode != "release_only" and has_doc and DOC_LINK_PLACEHOLDER in content:
+                att_rel.append("The doc page was not published, so the release note says "
+                               f"\"{DOCS_COMING_SOON}\" instead of linking it. Add the link once the doc page is live.")
+                return _coming_soon(content)
+            return finalize_doc_link(content, None)
 
-        # ── Releases repo ──────────────────────────────────────────────────
-        if mode != "doc_only":
-            try:
-                releases_sha = self._get_branch_sha(RELEASES_REPO, BASE_BRANCH)
-                self._create_branch(RELEASES_REPO, branch, releases_sha)
-
-                if subsections:
-                    parent_slug = subsections["parent_slug"]
-                    parent_title = subsections["parent_title"]
-                    folder_path = f"{self.scope.rooted(release_month)}/{parent_slug}"
-                    self._write_file(RELEASES_REPO, f"{folder_path}/README.md", subsections["parent_content"], branch,
-                                     f"docs: add {parent_slug} parent overview")
-
-                    summary_children, to_check = [], []
-                    first_doc = (subsections["children"][0]["draft"].get("doc_page") or {}) if subsections["children"] else {}
-                    for child_result in subsections["children"]:
-                        child_slug = child_result["slug"]
-                        child_draft = child_result["draft"]
-                        child_rn = child_draft.get("release_note", {})
-                        if not child_rn:
-                            continue
-                        child_doc = child_draft.get("doc_page") or {}
-                        child_doc_path = (safe("Planning the doc page path", att_rel, self._planned_doc_path, target_section,
-                                               {**child_doc, "target_path": first_doc.get("target_path", "")},
-                                               parent_slug, child_slug, guess_label)
-                                          if mode in ("both", "doc_only") and child_doc else None)
-                        child_body = finalize_doc_link(child_rn.get("content", ""), docs_url(child_doc_path) if child_doc_path else None)
-                        child_path = f"{folder_path}/{child_slug}.md"
-                        child_content = repaired(RELEASES_REPO, child_path, child_rn.get("frontmatter", "") + "\n\n" + child_body,
-                                                 att_rel, [child_doc_path] if child_doc_path else [])
-                        self._write_file(RELEASES_REPO, child_path, child_content, branch, f"docs: add {child_slug} release note")
-                        child_title = self._extract_title(child_rn.get("content", ""), child_slug.replace("-", " ").title())
-                        summary_children.append({"title": child_title, "path": child_path})
-                        to_check.append((child_path, child_content, [child_doc_path] if child_doc_path else []))
-
-                    safe("Updating the releases sidebar", att_rel, self._update_summary_nested,
-                         RELEASES_REPO, branch, release_month.replace("-", " ").upper(),
-                         relative_to_summary(f"{folder_path}/README.md", summary_path), parent_title,
-                         [{**c, "path": relative_to_summary(c["path"], summary_path)} for c in summary_children],
-                         allow_new_group=True)
-                    upload_assets(RELEASES_REPO, self._subsection_text(subsections, "release_note"), f"{folder_path}/assets", att_rel)
-                    for path, text, extra in to_check:
-                        att_rel += safe("Link check", att_rel, self._check_links, RELEASES_REPO, path, text, results, extra) or []
-                    patch_impacted(RELEASES_REPO, "releases.flytbase.com", att_rel, "releases_impacted")
-                    body = self._build_pr_body_subsections(parent_title, f"{folder_path}/README.md", summary_children,
-                                                           impacted_edits, "releases", requester_name, requester_username,
-                                                           slack_channel, slack_thread_ts)
-                    items = shared + att_rel
-                    results["releases_pr"] = self._open_pr(
-                        RELEASES_REPO, branch, f"✍️ New Release Notes: {parent_title} ({len(summary_children)} subsections)",
-                        self._attention_block(items) + self._fixes_block(fixes) + body, items)
-
-                elif release_note:
-                    filename = Path(release_note.get("filename", "release.md")).name
-                    doc_path = (safe("Planning the doc page path", att_rel, self._planned_doc_path, target_section,
-                                     draft_result.get("doc_page") or {}, "", "", guess_label)
-                                if mode in ("both", "doc_only") else None)
-                    release_body = finalize_doc_link(release_note.get("content", ""), docs_url(doc_path) if doc_path else None)
-                    file_path = f"{self.scope.rooted(release_month)}/{filename}"
-                    full_content = repaired(RELEASES_REPO, file_path, release_note.get("frontmatter", "") + "\n\n" + release_body,
-                                            att_rel, [doc_path] if doc_path else [])
-                    self._write_file(RELEASES_REPO, file_path, full_content, branch, f"docs: add {feature_slug} release note")
-                    release_file = (file_path, doc_path)
-
-                    slug_title = feature_slug.replace("-", " ").title()
-                    rn_title = self._extract_title(release_note.get("content", ""), slug_title)
-                    safe("Updating the releases sidebar", att_rel, self._update_summary,
-                         RELEASES_REPO, branch, release_month.replace("-", " ").upper(),
-                         relative_to_summary(file_path, summary_path), rn_title, allow_new_group=True)
-                    upload_assets(RELEASES_REPO, full_content, f"{self.scope.rooted(release_month)}/assets", att_rel)
-                    patch_impacted(RELEASES_REPO, "releases.flytbase.com", att_rel, "releases_impacted")
-                    att_rel += safe("Link check", att_rel, self._check_links, RELEASES_REPO, file_path, full_content, results,
-                                    [doc_path] if doc_path else []) or []
-                    body = self._style_block(draft_result, "release_note") + self._build_pr_body(
-                        rn_title, release_note, impacted_edits, "releases", requester_name, requester_username,
-                        slack_channel, slack_thread_ts)
-                    items = shared + att_rel
-                    results["releases_pr"] = self._open_pr(
-                        RELEASES_REPO, branch, f"✍️ New Release Note: {rn_title}",
-                        self._attention_block(items) + self._fixes_block(fixes) + body, items)
-            except Exception as e:
-                results["errors"].append(report_exception("Releases repo failed", e))
-
+        # Docs first: the release note links to where the doc page actually landed.
         # ── Docs repo ──────────────────────────────────────────────────────
         if mode != "release_only":
+            docs_file, docs_children = None, {}
             try:
-                docs_sha = self._get_branch_sha(DOCS_REPO, BASE_BRANCH)
-                self._create_branch(DOCS_REPO, branch, docs_sha)
+                self._begin(DOCS_REPO, branch)
 
                 if subsections:
                     parent_slug = subsections["parent_slug"]
@@ -1075,7 +1118,8 @@ class GitHubPublisher:
                         results["docs_section"] = placement.label
                     else:
                         results["docs_section"] = "(not in the sidebar yet)"
-                    results["docs_file"] = readme
+                    docs_file = readme
+                    docs_children = dict(zip((c["slug"] for c in subsections["children"]), child_paths))
 
                     upload_assets(DOCS_REPO, self._subsection_text(subsections, "doc_page"), f"{folder_path}/assets", att_docs)
                     patch_impacted(DOCS_REPO, "docs.flytbase.com", att_docs, "docs_impacted")
@@ -1083,6 +1127,7 @@ class GitHubPublisher:
                         att_docs += safe("Link check", att_docs, self._check_links, DOCS_REPO, path, text, results, extra) or []
                     body = self._build_pr_body_subsections(parent_title, readme, summary_children, impacted_edits, "docs",
                                                            requester_name, requester_username, slack_channel, slack_thread_ts)
+                    self._commit(DOCS_REPO, f"docs: add {parent_title} ({len(summary_children)} subsections)", att_docs)
                     items = shared + att_docs
                     results["docs_pr"] = self._open_pr(
                         DOCS_REPO, branch, f"📄 New Doc Pages: {parent_title} ({len(summary_children)} subsections)",
@@ -1111,34 +1156,107 @@ class GitHubPublisher:
                         results["docs_section"] = placement.label
                     else:
                         results["docs_section"] = "(not in the sidebar yet)"
-                    results["docs_file"] = file_path
+                    docs_file = file_path
 
                     upload_assets(DOCS_REPO, full_content, f"{scoped_dir}/assets" if scoped_dir else "assets", att_docs)
                     patch_impacted(DOCS_REPO, "docs.flytbase.com", att_docs, "docs_impacted")
                     att_docs += safe("Link check", att_docs, self._check_links, DOCS_REPO, file_path, full_content, results) or []
                     body = self._build_pr_body(doc_title, doc_page, impacted_edits, "docs", requester_name, requester_username,
                                                slack_channel, slack_thread_ts)
+                    self._commit(DOCS_REPO, f"docs: add {doc_title}", att_docs)
                     items = shared + att_docs
                     results["docs_pr"] = self._open_pr(
                         DOCS_REPO, branch, f"📄 New Doc Page: {doc_title}",
                         self._attention_block(items) + self._placement_block(results) + self._fixes_block(fixes)
                         + self._gaps_block(draft_result) + self._style_block(draft_result, "doc_page") + body, items)
+                # Only a doc page with a PR is linked from the release note.
+                if results.get("docs_pr") and docs_file:
+                    results["docs_file"] = docs_file
+                    results["docs_child_files"] = docs_children
             except Exception as e:
                 results["errors"].append(report_exception("Docs repo failed", e))
+            finally:
+                if not results.get("docs_pr"):
+                    self._discard(DOCS_REPO)
 
-        # The release note links to where the doc page was planned to go. If it
-        # actually landed elsewhere, point the link at the real page.
-        if release_file and results.get("docs_file"):
-            rel_path, planned = release_file
-            actual = results["docs_file"]
-            if planned and planned != actual:
-                def relink():
-                    content, sha = self._get_file(RELEASES_REPO, rel_path, branch)
-                    if content and docs_url(planned) in content:
-                        self._write_file(RELEASES_REPO, rel_path, content.replace(docs_url(planned), docs_url(actual)), branch,
-                                         "docs: point the doc link at the published page", existing_sha=sha)
-                        fixes.append(f"Release note doc link changed to {docs_url(actual)} (where the page actually landed).")
-                safe("Updating the release note's doc link", att_rel, relink)
+        # ── Releases repo ──────────────────────────────────────────────────
+        if mode != "doc_only":
+            try:
+                self._begin(RELEASES_REPO, branch)
+
+                if subsections:
+                    parent_slug = subsections["parent_slug"]
+                    parent_title = subsections["parent_title"]
+                    folder_path = f"{self.scope.rooted(release_month)}/{parent_slug}"
+                    self._write_file(RELEASES_REPO, f"{folder_path}/README.md", subsections["parent_content"], branch,
+                                     f"docs: add {parent_slug} parent overview")
+
+                    summary_children, to_check = [], []
+                    for child_result in subsections["children"]:
+                        child_slug = child_result["slug"]
+                        child_draft = child_result["draft"]
+                        child_rn = child_draft.get("release_note", {})
+                        if not child_rn:
+                            continue
+                        child_doc_path = (results.get("docs_child_files") or {}).get(child_slug)
+                        child_body = doc_link(child_rn.get("content", ""), child_doc_path, bool(child_draft.get("doc_page")))
+                        child_path = f"{folder_path}/{child_slug}.md"
+                        child_content = repaired(RELEASES_REPO, child_path, child_rn.get("frontmatter", "") + "\n\n" + child_body,
+                                                 att_rel, [child_doc_path] if child_doc_path else [])
+                        self._write_file(RELEASES_REPO, child_path, child_content, branch, f"docs: add {child_slug} release note")
+                        child_title = self._extract_title(child_rn.get("content", ""), child_slug.replace("-", " ").title())
+                        summary_children.append({"title": child_title, "path": child_path})
+                        to_check.append((child_path, child_content, [child_doc_path] if child_doc_path else []))
+
+                    safe("Updating the releases sidebar", att_rel, self._update_summary_nested,
+                         RELEASES_REPO, branch, release_month.replace("-", " ").upper(),
+                         relative_to_summary(f"{folder_path}/README.md", summary_path), parent_title,
+                         [{**c, "path": relative_to_summary(c["path"], summary_path)} for c in summary_children],
+                         allow_new_group=True)
+                    upload_assets(RELEASES_REPO, self._subsection_text(subsections, "release_note"), f"{folder_path}/assets", att_rel)
+                    for path, text, extra in to_check:
+                        att_rel += safe("Link check", att_rel, self._check_links, RELEASES_REPO, path, text, results, extra) or []
+                    patch_impacted(RELEASES_REPO, "releases.flytbase.com", att_rel, "releases_impacted")
+                    body = self._build_pr_body_subsections(parent_title, f"{folder_path}/README.md", summary_children,
+                                                           impacted_edits, "releases", requester_name, requester_username,
+                                                           slack_channel, slack_thread_ts)
+                    self._commit(RELEASES_REPO, f"docs: add {parent_title} release notes ({len(summary_children)} subsections)", att_rel)
+                    items = shared + att_rel
+                    results["releases_pr"] = self._open_pr(
+                        RELEASES_REPO, branch, f"✍️ New Release Notes: {parent_title} ({len(summary_children)} subsections)",
+                        self._attention_block(items) + self._fixes_block(fixes) + body, items)
+
+                elif release_note:
+                    filename = Path(release_note.get("filename", "release.md")).name
+                    doc_path = results.get("docs_file")
+                    release_body = doc_link(release_note.get("content", ""), doc_path, bool(doc_page))
+                    file_path = f"{self.scope.rooted(release_month)}/{filename}"
+                    full_content = repaired(RELEASES_REPO, file_path, release_note.get("frontmatter", "") + "\n\n" + release_body,
+                                            att_rel, [doc_path] if doc_path else [])
+                    self._write_file(RELEASES_REPO, file_path, full_content, branch, f"docs: add {feature_slug} release note")
+
+                    slug_title = feature_slug.replace("-", " ").title()
+                    rn_title = self._extract_title(release_note.get("content", ""), slug_title)
+                    safe("Updating the releases sidebar", att_rel, self._update_summary,
+                         RELEASES_REPO, branch, release_month.replace("-", " ").upper(),
+                         relative_to_summary(file_path, summary_path), rn_title, allow_new_group=True)
+                    upload_assets(RELEASES_REPO, full_content, f"{self.scope.rooted(release_month)}/assets", att_rel)
+                    patch_impacted(RELEASES_REPO, "releases.flytbase.com", att_rel, "releases_impacted")
+                    att_rel += safe("Link check", att_rel, self._check_links, RELEASES_REPO, file_path, full_content, results,
+                                    [doc_path] if doc_path else []) or []
+                    body = self._style_block(draft_result, "release_note") + self._build_pr_body(
+                        rn_title, release_note, impacted_edits, "releases", requester_name, requester_username,
+                        slack_channel, slack_thread_ts)
+                    self._commit(RELEASES_REPO, f"docs: add {rn_title} release note", att_rel)
+                    items = shared + att_rel
+                    results["releases_pr"] = self._open_pr(
+                        RELEASES_REPO, branch, f"✍️ New Release Note: {rn_title}",
+                        self._attention_block(items) + self._fixes_block(fixes) + body, items)
+            except Exception as e:
+                results["errors"].append(report_exception("Releases repo failed", e))
+            finally:
+                if not results.get("releases_pr"):
+                    self._discard(RELEASES_REPO)
 
         results["needs_attention"] = list(dict.fromkeys(shared + att_rel + att_docs))
         results["fixes"] = list(dict.fromkeys(fixes))

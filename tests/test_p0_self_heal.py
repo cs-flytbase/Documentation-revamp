@@ -7,6 +7,7 @@ twice, unsupported claims shipped with no flag, and the release note linked
 to a URL that 404'd. Each path below must end in a published PR with a
 precise "Needs attention" item: never a crash, a silent skip or a failed run.
 """
+import base64
 import json
 import sys
 import types
@@ -33,12 +34,45 @@ LIVE_GUESS = f"{HTMFO}/multi-view-dashboard/live-video-feed"
 # ── A fake GitHub that behaves like the real API, errors included ─────────
 
 class FakeGitHub:
+    """A small git model: refs, commits, trees and blobs, plus contents, pulls
+    and labels. `files` starts as the seed for main and afterwards mirrors what
+    the run branches hold, so a test reads it as "what was published"."""
+
+    REPOS = ("FlytBaseAILabs/flytbase-docs", "FlytBaseAILabs/flytbase-releases")
+
     def __init__(self, docs_summary=CLOUD, releases_summary="# Releases\n\n## OCTOBER 2026\n\n* [Old](october-2026/old.md)\n"):
         self.files = {("FlytBaseAILabs/flytbase-docs", "SUMMARY.md"): docs_summary,
                       ("FlytBaseAILabs/flytbase-releases", "SUMMARY.md"): releases_summary}
         self.main = dict(self.files)
         self.branches, self.prs, self.labels, self.calls = set(), {}, [], []
-        self.fail = {}  # (method, path prefix) -> exception or status to raise
+        self.fail = {}  # (method, path prefix) -> exception, status, or a list of them consumed in order
+        self.refs, self.commits, self.trees, self.blobs = {}, {}, {}, {}
+        self.commit_log = []  # (repo, message, paths changed)
+        self._n, self._ready = 0, False
+
+    # git model
+    def _sha(self, kind):
+        self._n += 1
+        return f"{kind}{self._n}"
+
+    def _init(self):
+        if self._ready:
+            return
+        self._ready = True
+        self.main = dict(self.files)
+        for repo in self.REPOS:
+            t = self._sha("t")
+            self.trees[t] = {p: c for (r, p), c in self.files.items() if r == repo}
+            c = self._sha("c")
+            self.commits[c] = {"tree": t, "parents": []}
+            self.refs[(repo, "main")] = c
+
+    def tree_of(self, repo, branch):
+        return self.trees[self.commits[self.refs[(repo, branch)]]["tree"]]
+
+    def _mirror(self, repo, branch):
+        for path, content in self.tree_of(repo, branch).items():
+            self.files[(repo, path)] = content
 
     def http_error(self, status):
         import src.tools.github_publisher as gp
@@ -46,34 +80,98 @@ class FakeGitHub:
         err.response = types.SimpleNamespace(status_code=status)
         return err
 
-    def api(self, method, repo, path, **kw):
-        self.calls.append((method, repo, path))
-        for (m, prefix), what in self.fail.items():
+    def _maybe_fail(self, method, path):
+        for (m, prefix), what in list(self.fail.items()):
             if m == method and path.startswith(prefix):
+                if isinstance(what, list):
+                    if not what:
+                        continue
+                    what = what.pop(0)
+                    if what is None:
+                        continue
                 raise what if isinstance(what, BaseException) else self.http_error(what)
-        if path == "git/ref/heads/main":
-            return {"object": {"sha": "base"}}
-        if path == "git/refs":
-            ref = (repo, kw["json"]["ref"])
-            if ref in self.branches:
+
+    def api(self, method, repo, path, **kw):
+        self._init()
+        self.calls.append((method, repo, path))
+        self._maybe_fail(method, path)
+        body = kw.get("json") or {}
+        if path.startswith("git/ref/heads/") and method == "GET":
+            branch = path[len("git/ref/heads/"):]
+            if (repo, branch) not in self.refs:
+                raise self.http_error(404)
+            return {"object": {"sha": self.refs[(repo, branch)]}}
+        if path == "git/refs" and method == "POST":
+            branch = body["ref"][len("refs/heads/"):]
+            if (repo, branch) in self.refs:
                 raise self.http_error(422)
-            self.branches.add(ref)
+            self.refs[(repo, branch)] = body["sha"]
+            self.branches.add((repo, body["ref"]))
+            self._mirror(repo, branch)
             return {}
-        if path.startswith("git/trees/"):
-            return {"tree": [{"path": p, "type": "blob"} for (r, p) in self.main if r == repo]}
+        if path.startswith("git/refs/heads/") and method == "PATCH":
+            branch = path[len("git/refs/heads/"):]
+            if (repo, branch) not in self.refs or self.refs[(repo, branch)] not in self.commits[body["sha"]]["parents"]:
+                raise self.http_error(422)  # not a fast-forward
+            self.refs[(repo, branch)] = body["sha"]
+            self._mirror(repo, branch)
+            return {}
+        if path.startswith("git/refs/heads/") and method == "DELETE":
+            branch = path[len("git/refs/heads/"):]
+            self.refs.pop((repo, branch), None)
+            self.branches.discard((repo, f"refs/heads/{branch}"))
+            return {}
+        if path == "git/blobs" and method == "POST":
+            sha = self._sha("b")
+            raw = base64.b64decode(body["content"])
+            try:
+                self.blobs[sha] = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                self.blobs[sha] = raw
+            return {"sha": sha}
+        if path.startswith("git/commits/") and method == "GET":
+            return {"tree": {"sha": self.commits[path[len("git/commits/"):]]["tree"]}}
+        if path == "git/trees" and method == "POST":
+            t = self._sha("t")
+            self.trees[t] = {**self.trees[body["base_tree"]], **{e["path"]: self.blobs[e["sha"]] for e in body["tree"]}}
+            return {"sha": t}
+        if path == "git/commits" and method == "POST":
+            c = self._sha("c")
+            self.commits[c] = {"tree": body["tree"], "parents": body["parents"], "message": body["message"]}
+            parent_tree = self.trees[self.commits[body["parents"][0]]["tree"]] if body["parents"] else {}
+            changed = sorted(p for p, v in self.trees[body["tree"]].items() if parent_tree.get(p) != v)
+            self.commit_log.append((repo, body["message"], changed))
+            return {"sha": c}
+        if path.startswith("git/trees/") and method == "GET":
+            return {"tree": [{"path": p, "type": "blob"} for p in self.tree_of(repo, "main")]}
+        if path.startswith("contents/") and method == "GET":
+            ref = kw.get("params", {}).get("ref", "main")
+            if (repo, ref) not in self.refs:
+                raise self.http_error(404)
+            tree = self.tree_of(repo, ref)
+            fp = path[len("contents/"):]
+            if fp not in tree:
+                raise self.http_error(404)
+            data = tree[fp] if isinstance(tree[fp], bytes) else tree[fp].encode()
+            return {"content": base64.b64encode(data).decode(), "sha": f"s-{fp}"}
+        if path.startswith("contents/") and method == "PUT":  # the old one-file write, outside a staged run
+            self.files[(repo, path[len("contents/"):])] = base64.b64decode(body["content"]).decode()
+            return {}
         if path == "pulls" and method == "POST":
-            head = (repo, kw["json"]["head"])
+            head = (repo, body["head"])
+            if (repo, f"refs/heads/{body['head']}") not in self.branches:
+                raise self.http_error(422)  # GitHub: the head branch does not exist
             if head in self.prs:
                 raise self.http_error(422)
             n = len(self.prs) + 1
-            self.prs[head] = {"number": n, "html_url": f"https://github.com/{repo}/pull/{n}", **kw["json"]}
+            self.prs[head] = {"number": n, "html_url": f"https://github.com/{repo}/pull/{n}", **body}
             return self.prs[head]
         if path == "pulls" and method == "GET":
             branch = kw["params"]["head"].split(":", 1)[1]
             return [self.prs[(repo, branch)]] if (repo, branch) in self.prs else []
         if path.startswith("pulls/") and method == "PATCH":
             pr = next(p for p in self.prs.values() if p["number"] == int(path.split("/")[1]))
-            pr.update(kw["json"])
+            pr.update(body)
             return pr
         if path == "labels" or path.endswith("/labels"):
             self.labels.append((repo, path, kw.get("json")))
@@ -89,14 +187,6 @@ def make_publisher(monkeypatch, gh: FakeGitHub, scope=None):
     pub = gp.GitHubPublisher()
     pub._sleep = lambda s: None
     monkeypatch.setattr(pub, "_api", gh.api)
-    monkeypatch.setattr(pub, "_get_file", lambda repo, path, branch: (
-        (gh.main if branch == "main" else gh.files).get((repo, path)), "sha") if (repo, path) in (gh.main if branch == "main" else gh.files) else (None, None))
-
-    def write(repo, path, content, branch, msg, existing_sha=None):
-        gh.files[(repo, path)] = content
-        pub._written.setdefault(repo, set()).add(path)
-    monkeypatch.setattr(pub, "_write_file", write)
-    monkeypatch.setattr(pub, "_upload_asset", lambda repo, asset, folder, *a, **k: gh.files.__setitem__((repo, f"{folder}/{Path(asset).name}"), "bin"))
     return gp, pub
 
 
@@ -288,9 +378,9 @@ def test_docs_never_create_a_group_even_through_the_old_writers(monkeypatch):
     gh = FakeGitHub()
     gp, pub = make_publisher(monkeypatch, gh)
     with pytest.raises(ValueError, match="only created for release months"):
-        pub._update_summary("FlytBaseAILabs/flytbase-docs", "b", "Live Video Feed", "x.md", "X")
+        pub._update_summary("FlytBaseAILabs/flytbase-docs", "main", "Live Video Feed", "x.md", "X")
     with pytest.raises(ValueError):
-        pub._update_summary_nested("FlytBaseAILabs/flytbase-docs", "b", "Live Video Feed", "p/README.md", "P", [])
+        pub._update_summary_nested("FlytBaseAILabs/flytbase-docs", "main", "Live Video Feed", "p/README.md", "P", [])
 
 
 # ── Idempotent re-runs ────────────────────────────────────────────────────
@@ -391,20 +481,24 @@ def test_repair_links_repoints_unlinks_and_leaves_images_and_code_alone():
     assert len(fixed) == 2 and len(unlinked) == 1
 
 
+def _release(title="Zone Overlays"):
+    from src.release_template import render
+    return render({"filename": "zone-overlays.md", "title": title, "description": "x", "problem": "p.",
+                   "introduction": "i.", "capabilities": [{"name": "Z", "description": "d."}]}, [], doc_title=title)
+
+
 def test_release_note_link_follows_where_the_doc_actually_landed(monkeypatch):
     gh = FakeGitHub()
-    gp, pub = make_publisher(monkeypatch, gh)
-    from src.release_template import render
-    rn = render({"filename": "zone-overlays.md", "title": "Zone Overlays", "description": "x", "problem": "p.",
-                 "introduction": "i.", "capabilities": [{"name": "Z", "description": "d."}]}, [], doc_title="Zone Overlays")
+    _, pub = make_publisher(monkeypatch, gh)
     d = doc_draft()
-    d["release_note"] = rn
-    monkeypatch.setattr(pub, "_planned_doc_path", lambda *a, **k: "somewhere/else.md")
+    d["release_note"] = _release()
     r = publish(pub, d, mode="both", target_section="Cockpit 3.0")
     note = gh.files[("FlytBaseAILabs/flytbase-releases", "october-2026/zone-overlays.md")]
     assert f"https://docs.flytbase.com/{HTMFO}/cockpit-3-0/zone-overlays" in note
-    assert "somewhere/else" not in note
-    assert any("doc link changed" in f for f in r["fixes"])
+    assert r["docs_pr"] and r["releases_pr"]
+    # Docs are published first, so the link is built from the real result.
+    order = [repo for repo, _, _ in gh.commit_log]
+    assert order == ["FlytBaseAILabs/flytbase-docs", "FlytBaseAILabs/flytbase-releases"]
 
 
 # ── Assets ────────────────────────────────────────────────────────────────

@@ -100,6 +100,10 @@ def _publisher(monkeypatch, summary_text):
     monkeypatch.setattr(pub, "_get_file", lambda repo, path, branch: (files.get(path), "sha") if path in files else (None, None))
     monkeypatch.setattr(pub, "_write_file", lambda repo, path, content, branch, msg, existing_sha=None: files.__setitem__(path, content))
     monkeypatch.setattr(pub, "_protect_readme", lambda *a: None)
+    # An in-memory branch: writes land in `files` directly, so there is no
+    # staged commit to make (commits are covered in test_atomic_publish.py).
+    monkeypatch.setattr(pub, "_begin", lambda *a: None)
+    monkeypatch.setattr(pub, "_commit", lambda *a, **k: None)
     monkeypatch.setattr(pub, "_create_pr", lambda repo, branch, title, body: files.__setitem__("__pr_body__", body) or "https://github.com/x/pull/1")
     return pub, files
 
@@ -160,6 +164,10 @@ def _two_repo_publisher(monkeypatch, docs_summary, releases_summary, scope=None)
     monkeypatch.setattr(pub, "_get_file", lambda repo, path, branch: (files.get((repo, path)), "sha") if (repo, path) in files else (None, None))
     monkeypatch.setattr(pub, "_write_file", lambda repo, path, content, branch, msg, existing_sha=None: files.__setitem__((repo, path), content))
     monkeypatch.setattr(pub, "_protect_readme", lambda *a: None)
+    # An in-memory branch: writes land in `files` directly, so there is no
+    # staged commit to make (commits are covered in test_atomic_publish.py).
+    monkeypatch.setattr(pub, "_begin", lambda *a: None)
+    monkeypatch.setattr(pub, "_commit", lambda *a, **k: None)
     monkeypatch.setattr(pub, "_create_pr", lambda repo, branch, title, body: files.__setitem__((repo, "__pr_body__"), body) or "https://github.com/x/pull/1")
     return gp, pub, files
 
