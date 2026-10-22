@@ -16,13 +16,13 @@ FIELDS = {
         {"name": "Zone Proximity Warnings", "description": "The video glows red and shows the distance to the NFZ.", "asset": "zone-proximity.gif"},
         {"name": "Live Annotations", "description": "Draw arrows, circles and markers on the feed.", "asset": ""},
     ],
-    "why_it_matters": [{"benefit": "One screen", "detail": "Zones are on the video, so pilots stop switching to the map."},
+    "key_benefits": [{"benefit": "One screen", "detail": "Zones are on the video, so pilots stop switching to the map."},
                        {"benefit": "Earlier warnings", "detail": "Pilots see the distance before they reach an NFZ."}],
-    "who_its_for": [{"audience": "Remote pilots", "value": "Keep clear of restricted airspace."},
+    "intended_users": [{"audience": "Remote pilots", "value": "Keep clear of restricted airspace."},
                     {"audience": "Observers", "value": "See exactly what the pilot is pointing at."}],
-    "key_takeaways": ["Zones are visible on the video.", "Warnings start before the NFZ."],
+    "summary": ["Zones are visible on the video.", "Warnings start before the NFZ."],
     "hero_asset": "hero.gif",
-    "access": "",
+    "availability": "",
 }
 REQUIRED = ["hero.gif", "zone-overlays.gif", "zone-proximity.gif"]
 
@@ -34,7 +34,7 @@ def test_fixed_structure_and_order():
         "# Cockpit 3.0: See Zones, Get Warned, Brief Your Team on the Live Video",
         "## The Problem", "## Introducing Cockpit 3.0 Video Overlays",
         "### Zone Overlays", "### Zone Proximity Warnings", "### Live Annotations",
-        "## Why It Matters", "## Who It's For", "## Key Takeaways",
+        "## Key Benefits", "## Intended Users", "## Summary",
     ]
     lines = out.splitlines()
     assert lines[2] == '{% embed url="https://youtu.be/x" %}'        # video first
@@ -55,11 +55,11 @@ def test_benefits_and_audiences_render_as_labelled_bullets():
 
 
 def test_access_only_for_feature_flagged_features():
-    assert "## Access" not in render(FIELDS, REQUIRED)["content"]
+    assert "## Availability" not in render(FIELDS, REQUIRED)["content"]
     flagged = render(FIELDS, REQUIRED, feature_flag="video_overlays")["content"]
-    assert "## Access" in flagged and "`video_overlays`" in flagged
-    assert check_fields({**FIELDS, "access": "Contact support."}, REQUIRED) == [
-        'release note "access" must be empty: this feature is not behind a feature flag']
+    assert "## Availability" in flagged and "`video_overlays`" in flagged
+    assert check_fields({**FIELDS, "availability": "Contact support."}, REQUIRED) == [
+        'release note "availability" must be empty: this feature is not behind a feature flag']
 
 
 def test_required_assets_are_never_dropped():
@@ -75,12 +75,12 @@ def test_optional_assets_only_when_chosen():
 
 
 def test_field_checks():
-    bad = {**FIELDS, "description": "x" * 151, "problem": "a. b. c. d. e.", "why_it_matters": [],
+    bad = {**FIELDS, "description": "x" * 151, "problem": "a. b. c. d. e.", "key_benefits": [],
            "hero_asset": "nope.gif", "capabilities": [dict(FIELDS["capabilities"][0], asset="zone-overlays.gif"),
                                                       dict(FIELDS["capabilities"][1], asset="zone-overlays.gif")]}
     joined = "\n".join(check_fields(bad, REQUIRED))
     for expected in ("description is 151 characters", '"problem" has more than 4 sentences',
-                     '"why_it_matters" needs at least 2 entries', "asset 'nope.gif' that is not in RELEASE ASSETS",
+                     '"key_benefits" needs at least 2 entries', "asset 'nope.gif' that is not in RELEASE ASSETS",
                      "asset 'zone-proximity.gif' missing from release note", "uses asset 'zone-overlays.gif' more than once"):
         assert expected in joined
 

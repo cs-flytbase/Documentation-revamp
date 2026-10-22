@@ -1,8 +1,7 @@
 """The release note template, enforced by code.
 
 A release note is a note, not documentation: it says what problem existed,
-what was released, why the approach is worth it, who it is for and what the
-reader walks away with. It has no steps, settings tables or troubleshooting;
+what was released, its key benefits, its intended users and a summary. It has no steps, settings tables or troubleshooting;
 those live on the doc page it links to. (Senior review, 2026-10-19.)
 
 The model never writes release note Markdown. It returns the template's
@@ -18,11 +17,16 @@ same structure in the same order:
     ## The Problem
     ## Introducing <Feature>
     ### <Capability>  + image                   one per capability when there are several
-    ## Why It Matters                         benefits of the approach (value proposition)
-    ## Who It's For
-    ## Key Takeaways                          what the reader walks away with
+    ## Key Benefits                           benefits of the approach (value proposition)
+    ## Intended Users
+    ## Summary                                what the reader walks away with
     For setup and full details, see [<doc page>](<link>).   only if a doc page is published
-    ## Access                                 ONLY for features behind a feature flag
+    ## Availability                           ONLY for features behind a feature flag
+
+Headings and tone are enterprise wording (2026-10-22): "Why It Matters",
+"Who It's For", "Key Takeaways" and "Access" read as informal. Release notes
+are read by executives, marketing, operators and developers at once, so the
+tone rules below write for all four.
 
 There is no length limit: each field is short, and a release with many
 capabilities is allowed to be long.
@@ -39,12 +43,33 @@ MAX_CAPABILITY_SENTENCES = 3
 MAX_LIST = 6
 
 RELEASE_NOTE_PROMPT = r"""You are the Drafting Agent for the FlytBase documentation pipeline.
-You are writing a RELEASE NOTE: a short, marketable note announcing what was released.
+You are writing a RELEASE NOTE: a short, professional announcement of what was released.
 
 It is NOT documentation. It never contains steps, settings, tables, edge cases or
 troubleshooting; the doc page has all of that and the release note links to it.
-It answers: what problem existed, what was released, why this approach is worth
-it, who it is for, and what the reader walks away with.
+It answers: what problem existed, what was released, its key benefits, its
+intended users, and a summary of what the reader should know.
+
+TONE AND STYLE
+FlytBase is an enterprise company working where aerospace and SaaS meet. The
+release note is read by four audiences at once: executives, marketing,
+operators and flight teams, and developers and integrators. Write for all four:
+- Write in layers. The first sentence of each section and capability states
+  the outcome in plain language, so an executive can stop there. The sentences
+  after it say how it works in operations. Technical specifics (limits,
+  distances, units, requirements, API details) go in the capability descriptions.
+- Refer to people by role, in the third person: "Operators can...",
+  "Remote operations teams can...". Never address the reader as "you".
+- Declarative sentences only. No questions, exclamation marks, emojis or
+  rhetorical openers.
+- Present tense. One idea per sentence; aim for under 25 words.
+- Spell out acronyms on first use: "No-Fly Zone (NFZ)".
+- Quantify with the exact numbers and units from the source ("80 m at 10 m/s"),
+  never a bare "earlier" or "faster". Never invent a number.
+- Precise verbs (displays, warns, sends, shares, highlights). No hype or filler:
+  no "game-changer", "seamless", "revolutionary", "cutting-edge", "empowers",
+  "unlocks", "elevates", "imagine...".
+- Use product names and on-screen labels exactly as in the source.
 
 You do not write Markdown or choose the structure. Fill in the fields below as
 JSON; the page is built from them by code in a fixed template.
@@ -59,30 +84,38 @@ JSON; the page is built from them by code in a fixed template.
   "capabilities": [
     {"name": "Capability name", "description": "1-3 sentences: what it does for the operator.", "asset": "exact-asset-filename.gif or empty"}
   ],
-  "why_it_matters": [{"benefit": "Short benefit", "detail": "One sentence explaining it, concretely."}],
-  "who_its_for": [{"audience": "Role or team", "value": "What changes for them, in one sentence."}],
-  "key_takeaways": ["What the reader walks away with, one line each."],
+  "key_benefits": [{"benefit": "Short noun phrase, e.g. Faster response to observed events", "detail": "One sentence explaining it, concretely."}],
+  "intended_users": [{"audience": "Role or team, e.g. Remote operations centres", "value": "What changes for them, in one sentence."}],
+  "summary": ["What the reader should know, one line each."],
   "hero_asset": "exact-asset-filename to show at the top, or empty",
-  "access": "Only if the FEATURE FLAG block below names a flag: one or two sentences on how to get it enabled. Otherwise empty."
+  "availability": "Only if the FEATURE FLAG block below names a flag: one or two sentences on how to get it enabled. Otherwise empty."
 }
 
 Field rules:
 - capabilities: one entry per distinct capability in the source, in the source's order.
   Never merge two capabilities or drop one. A single-capability release has one entry.
-- why_it_matters: 3-5 benefits of this approach. Concrete outcomes (fewer steps,
+- key_benefits: 3-5 benefits of this approach. Concrete outcomes (fewer steps,
   faster response, one screen instead of two), never vague praise.
-- who_its_for: 2-4 audiences actually named or clearly implied by the source.
-- key_takeaways: 3-5 lines.
+- intended_users: 2-4 roles or teams actually named or clearly implied by the source.
+- summary: 3-5 lines.
 - Assets: use only filenames from RELEASE ASSETS. Every asset listed as REQUIRED
   must be used exactly once (as hero_asset or a capability asset). OPTIONAL assets
   may be used if they show a capability well. Never use one asset twice.
-- Persuasive through concrete value, never through hype: no "game-changer",
-  "seamless", "revolutionary", "imagine...", or invented numbers.
 - No headings, tables, horizontal rules, hint blocks, step lists or video embeds
   inside any field. The template adds the video automatically.
 
 Return ONLY the JSON object. No markdown wrapping.
 """
+
+
+# Field names before 2026-10-22, still accepted.
+_OLD_KEYS = {"key_benefits": "why_it_matters", "intended_users": "who_its_for", "summary": "key_takeaways",
+             "availability": "access"}
+
+
+def _get(data: dict, key: str):
+    v = data.get(key)
+    return v if v else data.get(_OLD_KEYS.get(key, ""), v)
 
 
 def _sentences(text: str) -> list[str]:
@@ -123,8 +156,8 @@ def check_fields(data: dict, required_assets: list[str], optional_assets: list[s
     for c in caps:
         if len(_sentences(c.get("description"))) > MAX_CAPABILITY_SENTENCES:
             problems.append(f'release note capability "{c.get("name", "?")}": more than {MAX_CAPABILITY_SENTENCES} sentences')
-    for key, low in (("why_it_matters", 2), ("who_its_for", 1), ("key_takeaways", 2)):
-        items = data.get(key) or []
+    for key, low in (("key_benefits", 2), ("intended_users", 1), ("summary", 2)):
+        items = _get(data, key) or []
         if len(items) < low:
             problems.append(f'release note "{key}" needs at least {low} entries')
         if len(items) > MAX_LIST:
@@ -140,8 +173,8 @@ def check_fields(data: dict, required_assets: list[str], optional_assets: list[s
     dupes = {a for a in used if used.count(a) > 1}
     for a in dupes:
         problems.append(f"release note uses asset '{a}' more than once")
-    if not feature_flag and _clean(data.get("access")):
-        problems.append('release note "access" must be empty: this feature is not behind a feature flag')
+    if not feature_flag and _clean(_get(data, "availability")):
+        problems.append('release note "availability" must be empty: this feature is not behind a feature flag')
     return problems
 
 
@@ -151,7 +184,7 @@ def render(data: dict, required_assets: list[str], youtube_link: str = "", doc_t
     """Build the release note. Returns {"filename", "frontmatter", "content"}.
 
     Every REQUIRED asset is embedded exactly once even if the model forgot it.
-    The Access section exists only when a feature flag is known.
+    The Availability section exists only when a feature flag is known.
     """
     descs = asset_descriptions or {}
     allowed = set(required_assets) | set(optional_assets)
@@ -201,7 +234,7 @@ def render(data: dict, required_assets: list[str], youtube_link: str = "", doc_t
 
     def bullets(key, a, b):
         rows = []
-        for item in data.get(key) or []:
+        for item in _get(data, key) or []:
             if isinstance(item, dict):
                 head, tail = _clean(item.get(a)), _clean(item.get(b))
                 if head:
@@ -210,20 +243,22 @@ def render(data: dict, required_assets: list[str], youtube_link: str = "", doc_t
                 rows.append(f"- {_clean(item)}")
         return rows
 
-    out += ["## Why It Matters", ""] + bullets("why_it_matters", "benefit", "detail") + [""]
-    out += ["## Who It's For", ""] + bullets("who_its_for", "audience", "value") + [""]
-    out += ["## Key Takeaways", ""] + bullets("key_takeaways", "", "") + [""]
+    out += ["## Key Benefits", ""] + bullets("key_benefits", "benefit", "detail") + [""]
+    out += ["## Intended Users", ""] + bullets("intended_users", "audience", "value") + [""]
+    out += ["## Summary", ""] + bullets("summary", "", "") + [""]
 
     if doc_title:
         out += [f"{DOC_LINK_PREFIX}[{doc_title}]({DOC_LINK_PLACEHOLDER}).", ""]
 
     if feature_flag:
-        access = _clean(data.get("access")) or (
-            f"{feature} is behind the `{feature_flag}` feature flag and is not enabled by default. "
-            "Contact your FlytBase account team to enable it for your organization.")
-        if f"`{feature_flag}`" not in access and feature_flag not in access:
+        # The flag answer is sometimes a sentence ("contact FlytBase team for
+        # enablement"), not a flag name; only a name is shown as one.
+        is_name = " " not in feature_flag.strip()
+        access = _clean(_get(data, "availability")) or (
+            f"{feature} is not enabled by default. Contact the FlytBase team to enable it for your organization.")
+        if is_name and feature_flag not in access:
             access += f" Feature flag: `{feature_flag}`."
-        out += ["## Access", "", access, ""]
+        out += ["## Availability", "", access, ""]
 
     filename = Path(str(data.get("filename") or "release-note.md")).name
     if not filename.endswith(".md"):

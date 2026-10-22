@@ -51,8 +51,9 @@ DOC_PAGE_RULES = [
 # Tone differs by output (senior review, 2026-10-19): the release note sells
 # the value of the release; the doc page is a technical reference.
 TONE = {
-    "release": "TONE: a marketable note. Lead with the problem and the value of the approach: what the operator "
-               "gains, who it is for, what they walk away with. Confident and concrete, never hype.",
+    "release": "TONE: professional and enterprise-grade (aerospace and SaaS). Read by executives, marketing, operators "
+               "and developers at once: lead each section with the outcome in plain language, then how it works, with "
+               "technical specifics in the capability descriptions. Third person by role, never \"you\". Concrete, never hype.",
     "doc": "TONE: a technical reference, not marketing. Neutral, precise and concise: what an operator needs, said once. Every section must make "
            "sense on its own, because it is often read by an LLM answering a single question.",
 }
