@@ -452,12 +452,12 @@ class GitHubPublisher:
 
     @staticmethod
     def _gaps_block(draft_result: dict) -> str:
-        """Doc sections the source material did not cover, for the reviewer."""
+        """Master template sections left off the page, for the reviewer."""
         gaps = draft_result.get("_doc_gaps") or []
         if not gaps:
             return ""
-        return ("### Not covered in the source material\n\nThese sections say so on the page. "
-                "Add the information before merging, or accept the gap:\n\n"
+        return ("### Sections left out\n\nThe source material did not cover these master template sections, "
+                "so they are not on the page. Add the information and re-run if any of them should be there:\n\n"
                 + "\n".join(f"- {g}" for g in gaps) + "\n\n---\n\n")
 
     @staticmethod

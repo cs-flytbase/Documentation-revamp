@@ -64,3 +64,40 @@ description_max_chars: 150
 
 # Sentences longer than this are reported as warnings (ASD-STE100 style).
 max_sentence_words: 30
+
+# Doc pages only (master template, 2026-10-22): docs state facts, never sell
+# or reassure. Checked on doc pages, not on release notes.
+doc_banned_phrases:
+  - phrase: simply
+  - phrase: easily
+  - phrase: effortless
+  - phrase: effortlessly
+  - phrase: hassle-free
+  - phrase: user-friendly
+  - phrase: intuitive
+  - phrase: powerful
+  - phrase: world-class
+  - phrase: amazing
+  - phrase: just click
+  - phrase: just select
+  - phrase: just drag
+
+# Doc pages use US English (2026-10-22). Flagged, not replaced, because an
+# on-screen label may itself use another spelling.
+uk_spellings:
+  - {wrong: colour, right: color}
+  - {wrong: colours, right: colors}
+  - {wrong: behaviour, right: behavior}
+  - {wrong: behaviours, right: behaviors}
+  - {wrong: centre, right: center}
+  - {wrong: metre, right: meter}
+  - {wrong: metres, right: meters}
+  - {wrong: organisation, right: organization}
+  - {wrong: organise, right: organize}
+  - {wrong: analyse, right: analyze}
+  - {wrong: optimise, right: optimize}
+  - {wrong: recognise, right: recognize}
+  - {wrong: licence, right: license}
+  - {wrong: grey, right: gray}
+  - {wrong: favourite, right: favorite}
+  - {wrong: cancelled, right: canceled}

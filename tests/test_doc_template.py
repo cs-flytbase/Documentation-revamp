@@ -1,125 +1,114 @@
-"""Doc template (senior review, 2026-10-19): the technical reference, every
-section present, gaps marked instead of invented, and short: the reference
-sections are capped so a page is readable."""
+"""Doc master template (2026-10-22): the absolute truth on how to use a
+feature. 20 sections in a fixed order; a section the material does not cover
+is left out, never padded; every fact is stated once."""
 import re
 
-from src.doc_template import (GAP, MAX_CONTROLS, MAX_RULES, MAX_TROUBLESHOOTING, MAX_WORDS, check_fields,
-                              render, render_master)
+from src.doc_template import DOC_PAGE_PROMPT, GAP, SECTIONS, check_fields, render, render_master, title_case
 
 ASSETS = ["01-open-panel.png", "02-zone-overlays.gif"]
 
-FIELDS = {
+FULL = {
     "filename": "video-overlays.md", "target_path": "in-flight-modules",
-    "title": "Video Overlays", "description": "Zone overlays, proximity warnings and annotations on the live video.",
-    "overview": "Video overlays draw information on the live drone video.",
-    "problem_statement": "Pilots had to cross-check the map to know where zones were.",
-    "when_to_use": ["Flying near no-fly zones."], "when_not_to_use": ["Split-screen is on; use the map instead."],
-    "prerequisites": ["Zones are set up for the site."], "dependencies": ["Fast telemetry link."],
-    "navigation": ["**Cockpit > Video overlays** (layers icon, bottom-right of the video)"],
-    "interface_reference": [
-        {"element": "**Video overlays**", "what_it_does": "Opens the overlay panel, bottom-right of the video."},
-        {"element": "**Zone overlays**", "what_it_does": "Shows or hides NFZs and the geofence on the video."},
-    ],
-    "how_to": [{"task": "Show Zones on the Video", "steps": [
+    "title": "Zone Overlays", "description": "Show No-Fly Zones and the Geofence on the live video.",
+    "overview": "Zone Overlays draws No-Fly Zones (NFZs) and the Geofence on the live video.",
+    "when_to_use": ["Flying near NFZs."], "when_not_to_use": ["Split-screen is on; use the map instead."],
+    "availability": "Behind a feature flag. Contact the FlytBase team to enable it.",
+    "compatibility": ["Dock 2 and Dock 3 payload cameras."],
+    "prerequisites": ["Zones are synced to the drone."], "dependencies": ["Zone sync to the drone."],
+    "roles_and_permissions": ["Any user with access to the drone."],
+    "navigation": ["**Video overlays** at the bottom-right of the video"],
+    "controls_and_indicators": [{"name": "**Zone overlays**", "description": "Toggle that shows or hides zones on the video."}],
+    "procedures": [{"task": "show zones on the video", "steps": [
         {"text": "**Click** **Video overlays**. The panel opens.", "asset": "01-open-panel.png"},
         {"text": "**Turn on** **Zone overlays**. Zones appear on the video.", "asset": "02-zone-overlays.gif"},
     ]}],
-    "rules": ["If Zone overlays is off, no zones are drawn.", "NFZs are red, the geofence is green."],
-    "limitations": ["Shows NFZs and the geofence only."],
-    "troubleshooting": [{"problem": "No zones appear", "fix": "Sync the zones to the drone."}],
-    "after_you_finish": ["The toggle state is remembered."],
+    "expected_behavior": ["NFZs appear as red shaded areas; the Geofence appears as a green outline."],
+    "operating_constraints": ["Only zones synced to the drone are drawn."],
+    "edge_cases": [{"condition": "The drone has no synced zones", "behavior": "Nothing is drawn on the video."}],
+    "system_messages": [{"message": "No zones synced to this drone.", "meaning": "No zone data for this drone.", "action": "Sync the zones."}],
+    "faqs": [{"question": "Why is the Geofence missing", "answer": "See Operating Constraints."}],
+    "after_completion": ["Cockpit remembers the toggle state."],
+    "glossary": [{"term": "Geofence", "definition": "The boundary the drone must stay inside."}],
     "related_pages": [{"title": "Zones", "url": "../pre-flight-modules/zones.md"}],
 }
 
-ORDER = ["# Video Overlays", "## Overview", "## Problem Statement", "## Use Cases", "### When to Use", "### When Not to Use",
-         "## Before You Start", "### Prerequisites", "### Dependencies", "## Navigation", "## Interface Reference",
-         "## How To", "### Show Zones on the Video", "## Behaviour and Rules",
-         "## Limitations, Edge Cases and Troubleshooting", "### Limitations", "### Troubleshooting",
-         "## After You Finish", "## Related Pages"]
+
+def _h2(content):
+    return re.findall(r"^## (.+)$", content, re.M)
 
 
-def test_every_section_in_fixed_order_with_video_first():
-    page, gaps = render(FIELDS, ASSETS, youtube_link="https://youtu.be/v")
+def test_full_page_has_all_sections_in_master_order_with_video_first():
+    page, omitted = render(FULL, ASSETS, youtube_link="https://youtu.be/v")
     c = page["content"]
-    assert re.findall(r"^#{1,3} .+$", c, re.M) == ORDER
+    assert _h2(c) == [h for _, h in SECTIONS]
     assert c.splitlines()[2] == '{% embed url="https://youtu.be/v" %}'
-    assert gaps == []
+    assert omitted == []
+    assert "### Show Zones on the Video" in c
 
 
-def test_images_sit_right_after_their_step():
-    c = render(FIELDS, ASSETS)[0]["content"]
+def test_missing_sections_are_left_out_not_padded():
+    sparse = {k: FULL[k] for k in ("filename", "title", "description", "overview", "procedures")}
+    page, omitted = render(sparse, ASSETS)
+    assert _h2(page["content"]) == ["Overview", "Procedures"]
+    assert GAP not in page["content"]
+    assert "Operating Constraints" in omitted and "Frequently Asked Questions" in omitted
+    assert "Related Pages" not in omitted
+
+
+def test_tables_and_faq_format():
+    c = render(FULL, ASSETS)[0]["content"]
+    assert "| Control | Description |" in c
+    assert "| Condition | What Happens |\n|---|---|\n| The drone has no synced zones | Nothing is drawn on the video. |" in c
+    assert '| "No zones synced to this drone." | No zone data for this drone. | Sync the zones. |' in c
+    assert "**Why is the Geofence missing?**\n\nSee Operating Constraints." in c
+    assert "| Term | Definition |" in c
+
+
+def test_images_sit_right_after_their_step_and_none_are_lost():
+    c = render(FULL, ASSETS)[0]["content"]
     assert re.search(r"1\. \*\*Click\*\* \*\*Video overlays\*\*\. The panel opens\.\n\n!\[.*\]\(assets/01-open-panel\.png\)", c)
-    assert c.count("](assets/02-zone-overlays.gif)") == 1
-
-
-def test_short_tables_and_lists():
-    c = render(FIELDS, ASSETS)[0]["content"]
-    assert "| Control | What It Does |" in c
-    assert "| **Zone overlays** | Shows or hides NFZs and the geofence on the video. |" in c
-    assert "- Shows NFZs and the geofence only." in c
-    assert "| Problem | What to Do |\n|---|---|\n| No zones appear | Sync the zones to the drone. |" in c
-
-
-def test_old_style_limitations_still_render():
-    c = render({**FIELDS, "limitations": [{"component": "Zone types", "details": "NFZs and geofence only"}]}, ASSETS)[0]["content"]
-    assert "- Zone types: NFZs and geofence only" in c
-
-
-def test_missing_sections_are_marked_never_dropped():
-    sparse = {k: v for k, v in FIELDS.items() if k not in ("troubleshooting", "dependencies", "after_you_finish", "navigation")}
-    page, gaps = render(sparse, ASSETS)
-    assert set(gaps) == {"Troubleshooting", "Dependencies", "After You Finish", "Navigation"}
-    assert page["content"].count(GAP) == 4
-    assert "## Navigation" in page["content"]
-
-
-def test_every_doc_asset_lands_once_even_if_forgotten():
-    forgot = {**FIELDS, "how_to": [{"task": "T", "steps": [{"text": "**Click** **Video overlays**.", "asset": ""}]}]}
+    forgot = {**FULL, "procedures": [{"task": "T", "steps": [{"text": "**Click** **Video overlays**.", "asset": ""}]}],
+              "section_assets": {"nonexistent_section": ["02-zone-overlays.gif"]}}
     c = render(forgot, ASSETS)[0]["content"]
     for a in ASSETS:
         assert c.count(f"](assets/{a})") == 1
 
 
-def test_reference_sections_are_capped():
-    big = {**FIELDS,
-           "interface_reference": [{"element": f"**Control {i}**", "what_it_does": "Does a thing."} for i in range(25)],
-           "rules": [f"Rule {i}." for i in range(30)],
-           "troubleshooting": [{"problem": f"P{i}", "fix": "F"} for i in range(12)]}
-    problems = "\n".join(check_fields(big, ASSETS))
-    assert f"interface_reference has 25 entries (max {MAX_CONTROLS})" in problems
-    assert f"rules has 30 entries (max {MAX_RULES})" in problems
-    assert f"troubleshooting has 12 entries (max {MAX_TROUBLESHOOTING})" in problems
-    c = render(big, ASSETS)[0]["content"]
-    assert c.count("| **Control ") == MAX_CONTROLS
-    assert c.count("\n- Rule ") == MAX_RULES
-    assert len(re.findall(r"^\| P\d+ \|", c, re.M)) == MAX_TROUBLESHOOTING
+def test_required_sections():
+    problems = check_fields({**FULL, "overview": "", "procedures": []}, ASSETS)
+    assert 'doc page field "overview" is empty (required)' in problems
+    assert "doc page has no procedures (at least one is required)" in problems
+    assert check_fields(FULL, ASSETS) == []
 
 
-def test_long_entries_are_sent_back():
-    wordy = {**FIELDS, "rules": [" ".join(["word"] * (MAX_WORDS + 5))]}
-    assert any(f"has {MAX_WORDS + 5} words" in p for p in check_fields(wordy, ASSETS))
-    assert check_fields(FIELDS, ASSETS) == []
+def test_faq_answers_are_short():
+    long = {**FULL, "faqs": [{"question": "Why?", "answer": "One. Two. Three."}]}
+    assert any("3-sentence answer (max 2)" in p for p in check_fields(long, ASSETS))
 
 
-def test_step_labels_do_not_need_a_table_row():
-    # The old rule (every bold label in a step needs an Interface Reference row)
-    # is what made the table 60 rows long.
-    extra = {**FIELDS, "how_to": [{"task": "T", "steps": [{"text": "**Click** the **Layers** icon, then **Settings > Telemetry**.",
-                                                          "asset": "01-open-panel.png"}, {"text": "**Look**.", "asset": "02-zone-overlays.gif"}]}]}
-    assert check_fields(extra, ASSETS) == []
-
-
-def test_prompt_asks_for_short():
-    from src.doc_template import DOC_PAGE_PROMPT
-    assert "exhaustive" not in DOC_PAGE_PROMPT and "{max_" not in DOC_PAGE_PROMPT
-    assert f"only the MAIN controls, at most {MAX_CONTROLS}" in DOC_PAGE_PROMPT
+def test_no_caps_on_detail():
+    many = {**FULL, "edge_cases": [{"condition": f"Condition number {i} happens", "behavior": f"Result {i}."} for i in range(30)]}
+    assert check_fields(many, ASSETS) == []
+    assert render(many, ASSETS)[0]["content"].count("| Condition number ") == 30
 
 
 def test_asset_checks():
-    problems = check_fields({**FIELDS, "section_assets": {"overview": ["01-open-panel.png", "ghost.png"]}}, ASSETS)
-    joined = "\n".join(problems)
-    assert "uses asset 'ghost.png' that is not in DOC ASSETS" in joined
-    assert "uses asset '01-open-panel.png' more than once" in joined
+    problems = "\n".join(check_fields({**FULL, "section_assets": {"overview": ["01-open-panel.png", "ghost.png"]}}, ASSETS))
+    assert "uses asset 'ghost.png' that is not in DOC ASSETS" in problems
+    assert "uses asset '01-open-panel.png' more than once" in problems
+
+
+def test_prompt_carries_homes_tone_and_us_english():
+    assert "__HOMES__" not in DOC_PAGE_PROMPT
+    assert "Defaults, thresholds, timings and rules: Expected Behavior" in DOC_PAGE_PROMPT
+    assert "The system is the subject" in DOC_PAGE_PROMPT and "US English" in DOC_PAGE_PROMPT
+    assert "NEVER invent" in DOC_PAGE_PROMPT
+
+
+def test_old_how_to_field_still_renders():
+    old = {k: v for k, v in FULL.items() if k != "procedures"}
+    old["how_to"] = FULL["procedures"]
+    assert "## Procedures" in render(old, ASSETS)[0]["content"]
 
 
 def test_master_page():
@@ -131,6 +120,5 @@ def test_master_page():
 
 
 def test_task_headings_are_title_case_without_touching_labels():
-    from src.doc_template import title_case
     assert title_case("send the drone to a point on the video") == "Send the Drone to a Point on the Video"
     assert title_case("turn on Zone overlays in the NFZ panel") == "Turn on Zone Overlays in the NFZ Panel"
