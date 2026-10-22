@@ -81,3 +81,20 @@ def missing_named(text: str, received: list[str]) -> list[str]:
         if _key(name) not in have and name not in out:
             out.append(name)
     return out
+
+
+_FOLLOW_UP = re.compile(r"\[Follow-up answer from [^\]]*\]:")
+
+
+def request_text(text: str) -> str:
+    """The material without the requester's folded follow-up answers.
+
+    Son of Anton appends each answer as "[Follow-up answer from X]: ...". An
+    answer often names files by other names (the Cockpit 3.0 thread listed
+    "cockpit-3.0_zone-overlays-in-video.gif" for a file that arrived as
+    "zone-overlays.gif"), and checking those names flagged files as "never
+    received" on every PR. File names are checked against the original
+    request and the text files only: from the first follow-up marker on, the
+    stored content is answers."""
+    m = _FOLLOW_UP.search(text or "")
+    return (text or "")[:m.start()] if m else (text or "")

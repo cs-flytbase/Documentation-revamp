@@ -43,29 +43,50 @@ jobs:
 
       - name: Extract payload
         id: payload
+        # Payload values are user- and model-supplied (a requested section name,
+        # a feature name). They reach the shell only through env, never as
+        # ${{ }} text inside the script, so quotes, $(...) or backticks in them
+        # are data, not code. The delimiter form keeps multi-line values intact.
+        env:
+          P_FEATURE_NAME: ${{ github.event.client_payload.feature_name }}
+          P_MODE: ${{ github.event.client_payload.mode }}
+          P_CONTENT_KEY: ${{ github.event.client_payload.content_key }}
+          P_WORKER_URL: ${{ github.event.client_payload.worker_url }}
+          P_REQUESTER_NAME: ${{ github.event.client_payload.requester_name }}
+          P_REQUESTER_USERNAME: ${{ github.event.client_payload.requester_username }}
+          P_SLACK_CHANNEL: ${{ github.event.client_payload.slack_channel }}
+          P_SLACK_THREAD_TS: ${{ github.event.client_payload.slack_thread_ts }}
+          P_TARGET_SECTION: ${{ github.event.client_payload.target_section }}
+          P_ALLOW_NEW_SECTION: ${{ github.event.client_payload.allow_new_section }}
+          P_DOC_SCOPE: ${{ github.event.client_payload.doc_scope }}
         run: |
-          echo "feature_name=${{ github.event.client_payload.feature_name }}" >> $GITHUB_OUTPUT
-          echo "mode=${{ github.event.client_payload.mode }}" >> $GITHUB_OUTPUT
-          echo "content_key=${{ github.event.client_payload.content_key }}" >> $GITHUB_OUTPUT
-          echo "worker_url=${{ github.event.client_payload.worker_url }}" >> $GITHUB_OUTPUT
-          echo "requester_name=${{ github.event.client_payload.requester_name }}" >> $GITHUB_OUTPUT
-          echo "requester_username=${{ github.event.client_payload.requester_username }}" >> $GITHUB_OUTPUT
-          echo "slack_channel=${{ github.event.client_payload.slack_channel }}" >> $GITHUB_OUTPUT
-          echo "slack_thread_ts=${{ github.event.client_payload.slack_thread_ts }}" >> $GITHUB_OUTPUT
-          echo "target_section=${{ github.event.client_payload.target_section }}" >> $GITHUB_OUTPUT
-          echo "allow_new_section=${{ github.event.client_payload.allow_new_section }}" >> $GITHUB_OUTPUT
-          echo "doc_scope=${{ github.event.client_payload.doc_scope }}" >> $GITHUB_OUTPUT
+          put() {
+            d="EOF_$(openssl rand -hex 8)"
+            printf '%s<<%s\n%s\n%s\n' "$1" "$d" "$2" "$d" >> "$GITHUB_OUTPUT"
+          }
+          put feature_name "$P_FEATURE_NAME"
+          put mode "$P_MODE"
+          put content_key "$P_CONTENT_KEY"
+          put worker_url "$P_WORKER_URL"
+          put requester_name "$P_REQUESTER_NAME"
+          put requester_username "$P_REQUESTER_USERNAME"
+          put slack_channel "$P_SLACK_CHANNEL"
+          put slack_thread_ts "$P_SLACK_THREAD_TS"
+          put target_section "$P_TARGET_SECTION"
+          put allow_new_section "$P_ALLOW_NEW_SECTION"
+          put doc_scope "$P_DOC_SCOPE"
 
       - name: Extract subsections
         id: subsections
+        env:
+          P_SUBSECTIONS: ${{ github.event.client_payload.subsections }}
         run: |
-          # Subsections is passed as a JSON string — write to file for Python to read
-          SUBSECTIONS_JSON='${{ github.event.client_payload.subsections }}'
-          if [ -n "$SUBSECTIONS_JSON" ] && [ "$SUBSECTIONS_JSON" != "null" ]; then
-            echo "$SUBSECTIONS_JSON" > /tmp/subsections.json
-            echo "has_subsections=true" >> $GITHUB_OUTPUT
+          # Subsections is passed as a JSON string; written to a file for Python.
+          if [ -n "$P_SUBSECTIONS" ] && [ "$P_SUBSECTIONS" != "null" ]; then
+            printf '%s' "$P_SUBSECTIONS" > /tmp/subsections.json
+            echo "has_subsections=true" >> "$GITHUB_OUTPUT"
           else
-            echo "has_subsections=false" >> $GITHUB_OUTPUT
+            echo "has_subsections=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Fetch content from Worker KV and run pipeline

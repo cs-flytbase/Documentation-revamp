@@ -379,11 +379,19 @@ class PineconeStore:
                 self.sleep(min(2.0 ** attempt, 30.0))
 
     def list_ids(self, prefix: str = "") -> list[str]:
+        """Every vector ID (with `prefix`). The SDK's page shape changed across
+        versions: up to v7 `index.list()` yields lists of ID strings, v10 yields
+        ListResponse pages whose `.vectors` are ListItem(id=...). Treating a v10
+        page as an ID broke the first --remove-legacy run (2026-10-22, run
+        39744249307: "slice(17, None, None)"). _ids_of accepts every shape and
+        rejects anything that is not an ID, so a future change fails loudly
+        instead of feeding objects into deletes."""
         def run():
             ids = []
-            for page in self.index.list(prefix=prefix, namespace=self.namespace) if prefix else \
-                    self.index.list(namespace=self.namespace):
-                ids.extend(page if isinstance(page, list) else [page])
+            pages = self.index.list(prefix=prefix, namespace=self.namespace) if prefix else \
+                self.index.list(namespace=self.namespace)
+            for page in pages:
+                ids.extend(_ids_of(page))
             return ids
         return self._retry("list", run)
 
@@ -411,6 +419,30 @@ class PineconeStore:
     def count(self) -> int:
         stats = self._retry("stats", lambda: self.index.describe_index_stats())
         return int(getattr(stats, "total_vector_count", None) or (stats.get("total_vector_count", 0) if isinstance(stats, dict) else 0))
+
+
+def _ids_of(page) -> list[str]:
+    """Vector IDs from one page of index.list(), whatever the SDK version."""
+    if page is None:
+        return []
+    if isinstance(page, str):
+        return [page]
+    if isinstance(page, (list, tuple)):
+        return [i for item in page for i in _ids_of(item)]
+    if isinstance(page, dict):
+        if "vectors" in page:
+            return _ids_of(page["vectors"])
+        if "id" in page:
+            return [page["id"]] if page["id"] else []
+    vectors = getattr(page, "vectors", None)
+    if vectors is not None and not isinstance(vectors, str):
+        return _ids_of(list(vectors))
+    vid = getattr(page, "id", None)
+    if isinstance(vid, str):
+        return [vid] if vid else []
+    if vid is None and hasattr(page, "id"):
+        return []  # a ListItem that carried no ID
+    raise TypeError(f"unrecognised index.list() item: {type(page).__name__}")
 
 
 @dataclass
@@ -649,7 +681,26 @@ def main(argv=None) -> int:
     if args.alert:
         post_alert(args.alert)
         return 0
+    rc = _main(args)
+    # Reached only when the script ran to its own report (and its own alert, if
+    # any); a crash raises past this line. The workflow's crash alert fires only
+    # without this marker, so one failure never produces two Slack alerts (it
+    # did on 2026-10-22).
+    _mark_reported()
+    return rc
 
+
+def _mark_reported() -> None:
+    marker = os.environ.get("CORPUS_REPORTED_MARKER", "")
+    if not marker:
+        return
+    try:
+        Path(marker).write_text("reported\n")
+    except OSError as e:
+        print(f"[corpus-sync] could not write the report marker {marker}: {e}", file=sys.stderr)
+
+
+def _main(args) -> int:
     token = os.environ.get("CORPUS_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN", "")
     if not token:
         post_alert(":rotating_light: *Corpus sync could not start:* no GitHub token (CORPUS_GITHUB_TOKEN) is configured.")

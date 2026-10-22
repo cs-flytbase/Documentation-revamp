@@ -14,6 +14,7 @@ import json
 import os
 import re
 
+from src.assets import request_text
 from src.run_journal import classify as classify_stage
 import sys
 import time
@@ -106,6 +107,10 @@ def build_material(kv: dict) -> dict:
                 audience[f] = aud
     return {
         "content": "\n\n".join(p for p in parts if p),
+        # What file-name checks read: the text files and the original request,
+        # not the folded follow-up answers (src/assets.request_text).
+        "naming_text": "\n\n".join(p for p in [tf.get("content", "") for tf in kv.get("text_files") or []]
+                                   + [request_text(raw)] if p),
         "comments": raw[:500],
         "reference_link": next((l for l in links if "releases.flytbase.com" in l), ""),
         "video_link": (intake.get("video_link") or (video_links[0] if video_links else "")),
@@ -337,13 +342,13 @@ def main() -> int:
         # message; the rest of a batch is easy to lose). Flagged, never fatal.
         from src.assets import missing_named
         attention = []
-        missing = missing_named(m["content"], [a["original"] for a in m["assets"]] + [a["file"] for a in m["assets"]])
+        missing = missing_named(m["naming_text"], [a["original"] for a in m["assets"]] + [a["file"] for a in m["assets"]])
         if missing:
             attention.append(f"The material names {len(missing)} file(s) that were never received: "
                              + ", ".join(missing[:12]) + (" ..." if len(missing) > 12 else "")
                              + ". Send them in the thread and ask for a re-run, or remove them from the material.")
         from src.assets import named_media
-        facts.update(attention=attention, named=named_media(m["content"]), missing_named=missing,
+        facts.update(attention=attention, named=named_media(m["naming_text"]), missing_named=missing,
                      received=[a["file"] for a in m["assets"] if a["file"] not in failed_files],
                      images=sum(1 for a in m["assets"] if a["kind"] != "video"))
         if failed_downloads:

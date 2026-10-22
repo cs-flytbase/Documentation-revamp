@@ -41,7 +41,11 @@ def build_message(pr: dict, status: dict | None, run_url: str) -> str | None:
             files = ", ".join(_code(f) for f in pr["docs_impacted"])
             lines.append(f"  Also adds cross-links to {len(pr['docs_impacted'])} existing page(s): {files}")
     if pr.get("feature_flag"):
-        lines.append(f"  Access section added for feature flag {_code(pr['feature_flag'])}.")
+        flag = str(pr["feature_flag"]).strip()
+        # A flag name is shown as code; a sentence ("contact FlytBase team for
+        # enablement") is not a flag name, so the release does not print it either.
+        lines.append(f"  Availability section added (feature flag {_code(flag)})." if flag and " " not in flag
+                     else "  Availability section added (behind a feature flag).")
 
     if pr.get("doc_gaps"):
         lines += ["", ":jigsaw: *Your material didn't cover these sections, so I left them off the doc page instead of inventing them:*"]

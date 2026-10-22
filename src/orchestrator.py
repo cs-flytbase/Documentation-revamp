@@ -5,6 +5,7 @@ Usage:
 """
 
 import json
+import re
 import shutil
 import time
 from datetime import datetime
@@ -15,6 +16,7 @@ import yaml
 
 from src.config import PROJECT_ROOT, SETTINGS
 from src.diag import report_exception
+from src.repair import repair_after_verification, safe_verify
 from src.doc_scope import CLOUD, get_scope
 from src.agents.research import ResearchAgent
 from src.agents.vision import VisionAgent
@@ -22,7 +24,6 @@ from src.agents.drafting import DraftingAgent
 from src.agents.verification import VerificationAgent
 from src.doc_template import render_master
 from src.assets import dedupe
-from src.repair import repair_after_verification
 from src.summary_placement import parent_chains
 
 
@@ -264,6 +265,27 @@ def fetch_exemplar(research_result: dict, doc_scope=CLOUD) -> str:
         return ""
 
 
+def _slugify(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")[:60].strip("-")
+
+
+def stable_feature_slug(feature_name: str, draft_result: dict) -> str:
+    """The slug in the run's branch name. It must be the same on a re-run of
+    the same request and different for two features in one thread, so it
+    comes from the requested feature name (PL_FEATURE_NAME, which names the
+    bundle), not from the file name the model happened to choose. The model's
+    file names are only a fallback, and the literal "feature" a last resort
+    (doc-only runs used to land there and share one branch)."""
+    slug = _slugify(feature_name)
+    if slug and slug != "feature":
+        return slug
+    for key in ("release_note", "doc_page"):
+        stem = _slugify(Path(str((draft_result.get(key) or {}).get("filename") or "")).stem)
+        if stem:
+            return stem
+    return "feature"
+
+
 def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "", asset_audience: dict | None = None, feature_flag: str = "", on_stage=None, attention: list | None = None, allow_new_section: bool = False) -> dict:
     """Run the full documentation generation pipeline.
 
@@ -374,11 +396,21 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                     for v in result:
                         section = v.get("section_heading", "?")
                         print(f"    - {v.get('file_name', '?')} → {section}: {v.get('description', '')[:60]}...")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - neither agent may fail the run
                 print(f"  {agent_name} agent FAILED: {e}")
                 reported = report_exception(f"{agent_name.capitalize()} agent failed", e)
                 if agent_name == "research":
-                    return {"status": "failed", "errors": [reported]}
+                    # Research only feeds placement guesses, corpus chunks and
+                    # impacted pages; the draft is built from the material.
+                    research_result = {}
+                    attention.append(f"The research step failed ({reported}), so no related pages were checked "
+                                     "and placement was not guessed from the corpus. Check the placement and links.")
+                else:
+                    attention.append(f"Image description failed for every file ({reported}); all alt text was "
+                                     "built from file names and the material. Check every image's alt text.")
+
+    if research_result is None or not isinstance(research_result, dict):
+        research_result = {}
 
     # Images the model could not describe got alt text from their file name
     # and the material; a person should check it.
@@ -534,7 +566,16 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     # Step 5: Verification — fact-check against sources
     _stage("checks")
     print("\n[Step 5] Running Verification agent...")
-    verifier = VerificationAgent()
+    try:
+        verifier = VerificationAgent()
+    except Exception as e:  # noqa: BLE001 - safe_verify below reports it
+        verifier = None
+        print(f"  Verification agent could not start: {e}")
+
+    def _check(**kw):
+        if verifier is None:
+            raise RuntimeError("the verification agent could not start")
+        return verifier.verify(**kw)
 
     if subsections and "_subsections" in draft_result:
         # Combine all child content for verification
@@ -552,13 +593,13 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
         rc = draft_result.get("release_note", {}).get("content", "")
         dc = draft_result.get("doc_page", {}).get("content", "")
 
-    verification_result = verifier.verify(
+    verification_result = safe_verify(lambda: _check(
         release_note_content=rc,
         doc_page_content=dc,
         pm_doc=pm_doc,
         corpus_chunks=research_result.get("relevant_chunks", []),
         transcript=bundle["transcript"],
-    )
+    ), attention)
 
     if not subsections:
         def _redraft(claims):
@@ -570,7 +611,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
             )
 
         def _reverify(d):
-            return verifier.verify(
+            return _check(
                 release_note_content=d.get("release_note", {}).get("content", ""),
                 doc_page_content=d.get("doc_page", {}).get("content", ""),
                 pm_doc=pm_doc, corpus_chunks=research_result.get("relevant_chunks", []),
@@ -675,9 +716,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
         # resolves it exactly and flags it as unconfirmed.
         draft_result["_placement_guess"] = (research_result.get("target_ia_node") or {}).get("label", "")
         from src.tools.github_publisher import GitHubPublisher
-        feature_slug = Path(
-            draft_result.get("release_note", {}).get("filename", "feature.md")
-        ).stem
+        feature_slug = stable_feature_slug(Path(bundle_path).name, draft_result)
         try:
             publisher = GitHubPublisher(doc_scope=scope)
             pr_results = publisher.publish(
