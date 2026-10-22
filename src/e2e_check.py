@@ -19,6 +19,7 @@ fails, so the Actions history shows it too.
 """
 from __future__ import annotations
 
+from src.alerts import shorten
 import base64
 import json as _json
 import os
@@ -224,7 +225,7 @@ def post_slack(text: str, token: str, channel: str, opener=None) -> str:
         return "SLACK_BOT_TOKEN is not set"
     opener = opener or urllib.request.urlopen
     req = urllib.request.Request("https://slack.com/api/chat.postMessage",
-                                 data=_json.dumps({"channel": channel, "text": text}).encode(),
+                                 data=_json.dumps({"channel": channel, "text": shorten(text)}).encode(),
                                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"})
     try:
         with opener(req, timeout=TIMEOUT) as resp:
