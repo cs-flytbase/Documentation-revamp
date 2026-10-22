@@ -550,3 +550,25 @@ def test_chain_label_round_trips_through_resolve_exact():
         label = chain_label(item)
         if [chain_label(i) for i in parse(CLOUD)[1]].count(label) == 1:
             assert resolve_exact(CLOUD, label) is not None, label
+
+
+# ── A new section, only when the requester asked for it by name ───────────
+
+def test_unknown_section_without_permission_never_creates_a_group(monkeypatch):
+    gh = FakeGitHub()
+    _, pub = make_publisher(monkeypatch, gh)
+    r = publish(pub, doc_draft(), target_section="Counter-UAS")
+    assert "## Counter-UAS" not in docs_summary(gh)
+    assert docs_summary(gh).count("\n## ") == CLOUD.count("\n## ")
+    assert any('"Counter-UAS", is not in the sidebar' in a for a in r["needs_attention"])
+
+
+def test_requested_new_section_is_created_before_discover_more(monkeypatch):
+    gh = FakeGitHub()
+    _, pub = make_publisher(monkeypatch, gh)
+    r = publish(pub, doc_draft(), target_section="Counter-UAS", allow_new_section=True)
+    lines = docs_summary(gh).splitlines()
+    assert lines.index("## Counter-UAS") < lines.index("## Discover More")
+    assert lines[lines.index("## Counter-UAS") + 2] == "* [Zone Overlays](counter-uas/zone-overlays.md)"
+    assert r["docs_file"] == "counter-uas/zone-overlays.md" and r["docs_section"] == "Counter-UAS"
+    assert not any("Placement unconfirmed" in a for a in r["needs_attention"])

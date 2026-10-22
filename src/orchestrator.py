@@ -264,7 +264,7 @@ def fetch_exemplar(research_result: dict, doc_scope=CLOUD) -> str:
         return ""
 
 
-def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "", asset_audience: dict | None = None, feature_flag: str = "", on_stage=None, attention: list | None = None) -> dict:
+def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "", asset_audience: dict | None = None, feature_flag: str = "", on_stage=None, attention: list | None = None, allow_new_section: bool = False) -> dict:
     """Run the full documentation generation pipeline.
 
     doc_scope ("cloud" or "onprem") selects the documentation set. It arrives
@@ -693,6 +693,7 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                 mode=mode,
                 subsections=draft_result.get("_subsections"),
                 target_section=target_section,
+                allow_new_section=allow_new_section,
                 doc_scope=scope.id,
                 attention=attention,
                 fixes=fixes,

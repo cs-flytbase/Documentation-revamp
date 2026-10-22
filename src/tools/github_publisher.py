@@ -20,7 +20,7 @@ from src.diag import report_exception
 from src.link_check import check_page, repair_links
 from src.release_template import docs_url, finalize_doc_link
 from src.summary_placement import (
-    insert_entries, insert_entry, nearest_ancestor, relative_to_summary, repo_path_for, resolve_exact,
+    add_group, insert_entries, insert_entry, nearest_ancestor, relative_to_summary, repo_path_for, resolve_exact,
     resolve_section, validate_insert,
 )
 from src.doc_scope import CLOUD, assert_in_scope, get_scope, scope_for_url
@@ -454,6 +454,14 @@ class GitHubPublisher:
             placement = resolve_section(text, target_section, allow_leaf=True)
             if placement:
                 return placement, text, sha, True, notes
+            # The requester asked for a new section by name: the only way a
+            # new top-level group is ever created in the docs.
+            if getattr(self, "_allow_new_section", False):
+                name = re.split(r"\s*>\s*", target_section.strip())[-1].strip()
+                if name:
+                    text, placement = add_group(text, name, self.scope.summary_anchor)
+                    notes.append(f'New sidebar section **{name}** created, as requested in the Slack thread.')
+                    return placement, text, sha, True, notes
             notes.append(f'The section you asked for, "{target_section}", is not in the sidebar (or matches more than '
                          "one place), so the page was placed by the pipeline instead.")
         placement = resolve_exact(text, guess_label) if guess_label else None
@@ -845,6 +853,7 @@ class GitHubPublisher:
         doc_scope: str = "",
         attention: list | None = None,
         fixes: list | None = None,
+        allow_new_section: bool = False,
     ) -> dict:
         """Full publish flow: branches, files, sidebar, assets, impacted pages, PRs.
 
@@ -864,6 +873,7 @@ class GitHubPublisher:
 
         Returns dict with PR URLs, needs_attention, fixes and any errors.
         """
+        self._allow_new_section = bool(allow_new_section)
         if doc_scope:
             self.scope = get_scope(doc_scope)
 

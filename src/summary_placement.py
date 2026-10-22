@@ -183,6 +183,28 @@ def resolve_section(summary: str, wanted: str, allow_leaf: bool = True) -> Place
     return None
 
 
+def add_group(summary: str, title: str, anchor: str = "") -> tuple[str, Placement]:
+    """A new top-level "## title" group, ONLY when the requester asked for it
+    by name (Son of Anton sends allow_new_section). Inserted before the scope's
+    anchor heading (e.g. "## Discover More") or at the end. Returns the new
+    SUMMARY text and the placement of the group's first entry."""
+    lines = summary.splitlines()
+    at = len(lines)
+    if anchor:
+        want = norm(anchor.lstrip("#"))
+        for i, line in enumerate(lines):
+            h = _HEADING.match(line)
+            if h and norm(h.group(1)) == want:
+                at = i
+                break
+    lead = [""] if at > 0 and lines[at - 1].strip() else []
+    lines[at:at] = lead + [f"## {title}", "", ""]
+    heading_at = at + len(lead)
+    entry_at = heading_at + 2          # between the two blank lines after the heading
+    folder = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return "\n".join(lines) + "\n", Placement(title, folder, entry_at, 0, "new heading")
+
+
 def insert_entry(summary: str, placement: Placement, title: str, rel_path: str) -> str:
     """Insert '* [title](rel_path)' at the placement. No-op if already listed."""
     if f"]({rel_path})" in summary:

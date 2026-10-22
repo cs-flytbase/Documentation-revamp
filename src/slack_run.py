@@ -329,6 +329,7 @@ def main() -> int:
             str(bundle_dir), mode=mode, requester_name=env.get("PL_REQUESTER_NAME", ""),
             requester_username=env.get("PL_REQUESTER_USERNAME", ""), slack_channel=channel,
             slack_thread_ts=thread_ts, subsections=subsections, target_section=env.get("PL_TARGET_SECTION", ""),
+            allow_new_section=env.get("PL_ALLOW_NEW_SECTION", "") == "true",
             doc_scope=env.get("PL_DOC_SCOPE", ""), asset_audience=m["asset_audience"],
             feature_flag=m["feature_flag"], on_stage=on_stage, attention=attention,
         )
