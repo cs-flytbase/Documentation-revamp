@@ -6,6 +6,7 @@ Blocks PR creation if critical issues (hallucinations) are found.
 """
 
 import json
+import re
 
 from src.agents.base import BaseAgent
 
@@ -58,6 +59,14 @@ Rules:
 """
 
 
+
+_IMAGE = re.compile(r"!\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)\)")
+
+
+def strip_alt_text(content: str) -> str:
+    """Markdown images with their alt text removed: ![...](x.png) -> ![](x.png)."""
+    return _IMAGE.sub(r"![](\1)", content or "")
+
 class VerificationAgent(BaseAgent):
     def __init__(self):
         super().__init__(
@@ -86,6 +95,10 @@ class VerificationAgent(BaseAgent):
         transcript: str = "",
     ) -> dict:
         """Verify generated content against source material."""
+        # Image alt text comes from the screenshots, not the written material:
+        # it is not checked as a claim (2026-10-22: 8 false flags on one run).
+        release_note_content = strip_alt_text(release_note_content)
+        doc_page_content = strip_alt_text(doc_page_content)
         corpus_text = self._format_corpus_chunks(corpus_chunks)
 
         transcript_section = ""

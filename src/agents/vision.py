@@ -32,7 +32,7 @@ Return a JSON array of objects, one per asset file. Each object:
   "description": "2-3 sentence description of what the image/GIF shows",
   "content_keywords": ["keyword1", "keyword2", "keyword3"],
   "feature_context": "One sentence explaining what feature or workflow this image demonstrates",
-  "alt_text": "concise accessibility text",
+  "alt_text": "ONE short sentence (at most 15 words) of what the screenshot shows, e.g. 'The grid area selected on the 3D map'. No numbers, setting values, aircraft or product names, or on-screen text.",
   "is_hero": true/false
 }
 
