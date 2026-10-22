@@ -1,0 +1,39 @@
+name: Health Check (Daily)
+
+# Checks what every Son of Anton run depends on, once a day, before anyone
+# needs it: OpenRouter credit, GitHub token write access, Slack token, the
+# worker (up, and /content locked), every workflow's last run, and whether
+# the vector corpus moves when the docs do. Spends no model tokens.
+# Posts to Slack only when something is wrong. Warnings never fail the job.
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install pyyaml
+      - name: Run health check
+        env:
+          GH_TOKEN: ${{ secrets.FLYTBASE_GITHUB_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME: flytbase-docs
+          SLACK_ALERT_CHANNEL: ${{ vars.SLACK_ALERT_CHANNEL }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
+          OPENROUTER_MIN_USD: ${{ vars.OPENROUTER_MIN_USD }}
+          OPENROUTER_MIN_FRACTION: ${{ vars.OPENROUTER_MIN_FRACTION }}
+        run: python3 -m src.health_check
