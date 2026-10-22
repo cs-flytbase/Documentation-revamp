@@ -27,7 +27,8 @@ def test_docs_urls_use_the_docs_repo_and_code_is_ignored():
     assert check_page(page, "october-2026/x.md", lambda p: False, docs_exists={"in-flight-modules/new-page.md"}.__contains__) == []
 
 
-def test_publisher_puts_broken_links_in_the_warnings(monkeypatch):
+def test_publisher_repairs_or_unlinks_broken_links_and_flags_them(monkeypatch):
+    """P0 2026-10-22: a broken link is never shipped. It is re-pointed or unlinked, and flagged."""
     from tests.test_summary_placement import CLOUD, _publisher
     pub, files = _publisher(monkeypatch, CLOUD)
     monkeypatch.setattr(pub, "_api", lambda method, repo, path, **kw: {"tree": [{"path": "pre-flight-modules/zones.md", "type": "blob"}]})
@@ -37,5 +38,7 @@ def test_publisher_puts_broken_links_in_the_warnings(monkeypatch):
         "release_note": {}, "impacted_page_edits": [],
     }
     results = pub.publish(draft, output_dir="/tmp", feature_slug="x", bundle_asset_paths=[], mode="doc_only")
-    assert any("ghost.md" in w for w in results.get("warnings", []))
-    assert "ghost.md" in files["__pr_body__"]
+    assert any("ghost.md" in w and "plain text" in w for w in results["needs_attention"])
+    assert "ghost.md" in files["__pr_body__"] and "## ⚠️ Needs attention" in files["__pr_body__"]
+    page = next(v for k, v in files.items() if k.endswith("/x.md"))
+    assert "[Ghost]" not in page and "Ghost" in page and "[Zones](../pre-flight-modules/zones.md)" in page

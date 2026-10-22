@@ -270,6 +270,7 @@ class DraftingAgent(BaseAgent):
         subsection_focus: dict = None,
         asset_audience: dict | None = None,
         feature_flag: str = "",
+        fact_check: list[str] | None = None,
     ) -> dict:
         descs = {v.get("file_name", ""): v.get("description", "") for v in (vision_output or [])}
         doc_assets, rel_required, rel_optional = route_assets(asset_filenames, asset_audience)
@@ -286,6 +287,12 @@ class DraftingAgent(BaseAgent):
         if videos:
             context += "\n\n--- WHAT THE SOURCE VIDEOS SHOW (source material, not embeddable) ---\n" + "\n".join(
                 f"- {k}: {v}" for k, v in videos.items()) + "\n--- END ---"
+        if fact_check:
+            # Repair pass after verification (P0, 2026-10-22): the previous
+            # draft made these claims and the source does not support them.
+            context += ("\n\n--- FACT CHECK: FIX THESE ---\nThe previous draft made these claims, which the source "
+                        "material does not support. Remove or correct each one, using only the source. Do not add "
+                        "any new claim.\n" + "\n".join(f"- {c}" for c in fact_check) + "\n--- END FACT CHECK ---")
         if subsection_focus:
             context += f"""
 

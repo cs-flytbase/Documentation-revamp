@@ -139,7 +139,7 @@ def test_publisher_honours_requested_section_over_the_model_guess(monkeypatch):
 def test_publisher_warns_loudly_when_section_is_unknown(monkeypatch):
     pub, files = _publisher(monkeypatch, CLOUD)
     results = _publish(pub, "Flux Factori Of Doom")
-    assert any("Flux Factori Of Doom" in w for w in results["warnings"])
+    assert any("Flux Factori Of Doom" in w for w in results["needs_attention"])
     assert "⚠️" in files["__pr_body__"]
 
 
@@ -200,3 +200,19 @@ def test_onprem_release_sidebar_links_are_relative(monkeypatch):
     summary = files[(gp.RELEASES_REPO, "on-premise/SUMMARY.md")]
     assert "(october-2026/smart-flight-logs.md)" in summary
     assert "(on-premise/october-2026" not in summary
+
+
+def test_new_group_only_when_asked_and_before_the_anchor():
+    from src.summary_placement import add_group, insert_entry, validate_insert
+    summary = "# Table of contents\n\n## In-Flight Modules\n\n* [Cockpit 3.0](in-flight/cockpit-3-0.md)\n\n## Discover More\n\n* [FAQs](discover-more/faqs.md)\n"
+    text, placement = add_group(summary, "Counter-UAS", "## Discover More")
+    lines = text.splitlines()
+    assert lines.index("## Counter-UAS") < lines.index("## Discover More")
+    assert placement.folder == "counter-uas" and placement.indent == 0
+    after = insert_entry(text, placement, "Drone Detection", "counter-uas/drone-detection.md")
+    al = after.splitlines()
+    assert al[al.index("## Counter-UAS") + 2] == "* [Drone Detection](counter-uas/drone-detection.md)"
+    assert al[al.index("## Counter-UAS") + 3] == ""
+    assert validate_insert(text, after, placement) == []
+    text2, p2 = add_group("## A\n\n* [X](x.md)\n", "New One")
+    assert text2.splitlines()[-3] == "## New One" and p2.insert_at == len(text2.splitlines()) - 1
