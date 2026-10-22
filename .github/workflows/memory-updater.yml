@@ -70,8 +70,15 @@ jobs:
             FEEDBACK="$COMMENT_BODY"
             SOURCE="PR #${ISSUE_NUMBER} in this repo"
           fi
-          echo "text=$FEEDBACK" >> $GITHUB_OUTPUT
-          echo "source=$SOURCE" >> $GITHUB_OUTPUT
+          # Multi-line feedback needs the delimiter form; "text=$FEEDBACK"
+          # broke on any comment with a newline ("Invalid format").
+          DELIM="EOF_$(openssl rand -hex 8)"
+          {
+            echo "text<<$DELIM"
+            printf '%s\n' "$FEEDBACK"
+            echo "$DELIM"
+            echo "source=$SOURCE"
+          } >> "$GITHUB_OUTPUT"
           echo "Feedback from $SOURCE"
 
       - name: Run memory updater
