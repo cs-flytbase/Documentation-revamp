@@ -52,7 +52,10 @@ You must produce a JSON response with exactly this schema:
 }
 
 Rules:
-- For target_ia_node, pick the MOST SPECIFIC node in the IA that fits. Don't pick a top-level section when a child fits better.
+- For target_ia_node, pick the section or page the new doc belongs UNDER. When the IA STRUCTURE is the live sidebar
+  (a list of "A > B > C" lines), copy one line EXACTLY into target_ia_node.label; never invent or reword a path.
+  Pick the most specific fit: if the feature is part of an existing page's product (e.g. a Cockpit 3.0 feature),
+  pick that page. Never pick a page that is merely a sibling topic.
 - For impacted_pages, look carefully at BOTH the semantic results AND the product area sweep results. Any page in the same product area that covers related functionality must be listed — especially release notes that group this product area's features together.
 - For relevant_chunks, include the top chunks that give the drafting agent useful context about existing content in the same area.
 - Return ONLY valid JSON. No markdown, no explanation outside the JSON.

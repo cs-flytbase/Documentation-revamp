@@ -53,6 +53,7 @@ jobs:
           echo "slack_channel=${{ github.event.client_payload.slack_channel }}" >> $GITHUB_OUTPUT
           echo "slack_thread_ts=${{ github.event.client_payload.slack_thread_ts }}" >> $GITHUB_OUTPUT
           echo "target_section=${{ github.event.client_payload.target_section }}" >> $GITHUB_OUTPUT
+          echo "allow_new_section=${{ github.event.client_payload.allow_new_section }}" >> $GITHUB_OUTPUT
           echo "doc_scope=${{ github.event.client_payload.doc_scope }}" >> $GITHUB_OUTPUT
 
       - name: Extract subsections
@@ -81,6 +82,7 @@ jobs:
           PL_SLACK_CHANNEL: ${{ steps.payload.outputs.slack_channel }}
           PL_SLACK_THREAD_TS: ${{ steps.payload.outputs.slack_thread_ts }}
           PL_TARGET_SECTION: ${{ steps.payload.outputs.target_section }}
+          PL_ALLOW_NEW_SECTION: ${{ steps.payload.outputs.allow_new_section }}
           PL_DOC_SCOPE: ${{ steps.payload.outputs.doc_scope }}
           PL_HAS_SUBSECTIONS: ${{ steps.subsections.outputs.has_subsections }}
         # The run lives in src/slack_run.py (tested), not in an inline script.

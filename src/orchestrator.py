@@ -21,6 +21,9 @@ from src.agents.vision import VisionAgent
 from src.agents.drafting import DraftingAgent
 from src.agents.verification import VerificationAgent
 from src.doc_template import render_master
+from src.assets import dedupe
+from src.repair import repair_after_verification
+from src.summary_placement import parent_chains
 
 
 def _save_feature_note(draft_result: dict, research_result: dict, pm_doc: str, bundle_name: str) -> None:
@@ -169,6 +172,36 @@ def validate_input_bundle(bundle_path: str) -> dict:
     return result
 
 
+def load_live_tree(doc_scope=CLOUD) -> str | None:
+    """Every place a doc page can go, read from the live SUMMARY.md on main.
+
+    The research agent used to pick from config/ia_structure.yaml, a snapshot
+    last updated in May that had no Cockpit 3.0, so the right section could
+    never be chosen (P0, 2026-10-22). Returns None if GitHub cannot be read;
+    the caller then falls back to the yaml and the PR says placement is
+    unconfirmed anyway.
+    """
+    import base64
+    from src.config import GITHUB_TOKEN
+    if not GITHUB_TOKEN:
+        return None
+    try:
+        import requests
+        r = requests.get(
+            f"https://api.github.com/repos/FlytBaseAILabs/flytbase-docs/contents/{doc_scope.summary_path}",
+            params={"ref": "main"}, timeout=30,
+            headers={"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"},
+        )
+        r.raise_for_status()
+        summary = base64.b64decode(r.json()["content"]).decode("utf-8")
+    except Exception as e:  # noqa: BLE001 - falls back to the yaml
+        print(f"  Live sidebar unavailable ({e}); using {doc_scope.ia_file}")
+        return None
+    chains = parent_chains(summary)
+    return ("Every existing section and page in the live sidebar. A new page goes UNDER one of these. "
+            "Copy the chosen line EXACTLY into target_ia_node.label.\n" + "\n".join(f"- {c}" for c in chains))
+
+
 def load_ia_summary(doc_scope=CLOUD) -> str:
     """Load a condensed IA structure for the research agent.
 
@@ -231,7 +264,7 @@ def fetch_exemplar(research_result: dict, doc_scope=CLOUD) -> str:
         return ""
 
 
-def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "", asset_audience: dict | None = None, feature_flag: str = "", on_stage=None) -> dict:
+def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "", requester_username: str = "", slack_channel: str = "", slack_thread_ts: str = "", subsections: dict = None, target_section: str = "", doc_scope: str = "", asset_audience: dict | None = None, feature_flag: str = "", on_stage=None, attention: list | None = None, allow_new_section: bool = False) -> dict:
     """Run the full documentation generation pipeline.
 
     doc_scope ("cloud" or "onprem") selects the documentation set. It arrives
@@ -243,7 +276,13 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     requester said the feature is behind one; it is what adds an Access section
     to the release note. on_stage(name) is called as each stage starts, so the
     Slack run can show live progress.
+
+    attention collects what a person must check before merging. It is shown
+    at the top of each PR and in Slack. Problems that can be repaired are
+    repaired; the rest are flagged here, never a reason to fail the run.
     """
+    attention = list(attention or [])
+    fixes: list[str] = []
     def _stage(name: str) -> None:
         if on_stage:
             try:
@@ -276,14 +315,24 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     for w in bundle["warnings"]:
         print(f"  WARNING: {w}")
 
+    # Identical files (the same GIF sent twice) are dropped before drafting,
+    # and their routing merged, so a page never shows one twice.
+    kept, dropped, asset_audience = dedupe(bundle["asset_paths"], asset_audience)
+    if dropped:
+        bundle["asset_paths"] = kept
+        bundle["asset_filenames"] = [Path(p).name for p in kept]
+        for name, same in dropped.items():
+            fixes.append(f"Dropped {name}: it is the same file as {same}.")
+            print(f"  Dropped duplicate {name} (same as {same})")
+
     pm_doc = Path(bundle["pm_doc_path"]).read_text()
     print(f"  Source doc: {bundle['pm_doc_path']} ({len(pm_doc)} chars)")
     print(f"  Assets: {len(bundle['asset_paths'])} files — {bundle['asset_filenames']}")
     print(f"  YouTube: {bundle['youtube_link'] or 'None'}")
     print(f"  Transcript: {len(bundle['transcript'])} chars" if bundle["transcript"] else "  Transcript: None")
 
-    # Step 2: Load IA summary
-    ia_summary = load_ia_summary(doc_scope=scope)
+    # Step 2: Where pages can go: the live sidebar, the yaml only as a fallback
+    ia_summary = load_live_tree(scope) or load_ia_summary(doc_scope=scope)
 
     # Step 3: Research + Vision in parallel
     _stage("analysis")
@@ -330,6 +379,13 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                 reported = report_exception(f"{agent_name.capitalize()} agent failed", e)
                 if agent_name == "research":
                     return {"status": "failed", "errors": [reported]}
+
+    # Images the model could not describe got alt text from their file name
+    # and the material; a person should check it.
+    for v in vision_result or []:
+        if v.get("_fallback"):
+            attention.append(f"Image description failed for {v.get('file_name')}; its alt text was built from the "
+                             f"file name and material (\"{v.get('description', '')[:80]}\"). Check it.")
 
     # Step 3.5: Fetch exemplar from corpus
     print("\n[Step 3.5] Fetching exemplar page from corpus...")
@@ -504,6 +560,30 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
         transcript=bundle["transcript"],
     )
 
+    if not subsections:
+        def _redraft(claims):
+            return drafting_agent.draft(
+                pm_doc=pm_doc, research_output=research_result, vision_output=vision_result,
+                asset_filenames=bundle["asset_filenames"], youtube_link=bundle["youtube_link"],
+                release_month=release_month, transcript=bundle["transcript"], exemplar=exemplar,
+                mode=mode, asset_audience=asset_audience, feature_flag=feature_flag, fact_check=claims,
+            )
+
+        def _reverify(d):
+            return verifier.verify(
+                release_note_content=d.get("release_note", {}).get("content", ""),
+                doc_page_content=d.get("doc_page", {}).get("content", ""),
+                pm_doc=pm_doc, corpus_chunks=research_result.get("relevant_chunks", []),
+                transcript=bundle["transcript"],
+            )
+
+        draft_result, verification_result = repair_after_verification(
+            _redraft, _reverify, draft_result, verification_result, attention)
+    else:
+        for i in [i for i in verification_result.get("issues", []) if i.get("severity") == "critical"][:8]:
+            attention.append(f"Fact check: not supported by the source material: [{i.get('location', '')}] "
+                             f"{i.get('claim') or i.get('description') or ''}")
+
     verified = verification_result.get("verified", False)
     score = verification_result.get("faithfulness_score", 0)
     issues = verification_result.get("issues", [])
@@ -590,7 +670,10 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
         _stage("publish")
         print("\n[Step 7] Publishing to GitHub...")
         if not verified:
-            print(f"  ⚠ Verification flagged {len(critical_issues)} critical issues — included in PR for reviewer")
+            print(f"  ⚠ Verification flagged {len(critical_issues)} critical issues — listed under Needs attention")
+        # The research agent's pick from the live sidebar; the publisher
+        # resolves it exactly and flags it as unconfirmed.
+        draft_result["_placement_guess"] = (research_result.get("target_ia_node") or {}).get("label", "")
         from src.tools.github_publisher import GitHubPublisher
         feature_slug = Path(
             draft_result.get("release_note", {}).get("filename", "feature.md")
@@ -610,7 +693,10 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
                 mode=mode,
                 subsections=draft_result.get("_subsections"),
                 target_section=target_section,
+                allow_new_section=allow_new_section,
                 doc_scope=scope.id,
+                attention=attention,
+                fixes=fixes,
             )
             if pr_results.get("releases_pr"):
                 print(f"    Releases PR: {pr_results['releases_pr']}")
@@ -633,8 +719,11 @@ def run_pipeline(bundle_path: str, mode: str = "both", requester_name: str = "",
     print(f"Output: {output_dir}")
     print(f"{'=' * 60}")
 
+    # Unsupported claims are under Needs attention, not a failed run.
     return {
-        "status": "success" if verified else "verification_failed",
+        "status": "success",
+        "attention": attention,
+        "fixes": fixes,
         "output_dir": str(output_dir),
         "validation_warnings": validation_warnings,
         "verification": verification_result,

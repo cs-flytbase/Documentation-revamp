@@ -34,7 +34,7 @@ def test_publisher_and_orchestrator_agree():
     """The single check that would have caught the regression outright."""
     pub_args = _fn_args(PUB, "publish")
     # Every keyword the orchestrator passes must exist on publish().
-    for kw in ["mode", "subsections", "target_section", "doc_scope"]:
+    for kw in ["mode", "subsections", "target_section", "doc_scope", "attention", "fixes"]:
         assert kw in pub_args, (
             f"orchestrator calls publish({kw}=...) but publish() does not accept it - "
             "this is a TypeError on every pipeline run"
@@ -46,9 +46,14 @@ def test_run_pipeline_still_accepts_target_section():
 
 
 def test_target_section_wins_over_the_per_child_guess():
-    """Restoring the parameter is pointless if it is never consulted."""
-    assert "if target_section:" in PUB
-    assert "parent_section = target_section" in PUB
+    """Restoring the parameter is pointless if it is never consulted: the
+    requester's section is resolved first, and the docs never fall back to
+    the heading-matching writers that invented "## Live Video Feed"."""
+    i = PUB.index("def _resolve_placement(")
+    body = PUB[i:PUB.index("\n    def ", i + 10)]
+    assert body.index("if target_section:") < body.index("resolve_exact(")
+    docs = PUB[PUB.index("# ── Docs repo"):PUB.index("return results", PUB.index("# ── Docs repo"))]
+    assert "_update_summary(" not in docs and "_update_summary_nested(" not in docs
 
 
 def test_new_docs_sections_anchor_before_discover_more():
@@ -156,7 +161,7 @@ def test_release_paths_are_rooted_in_the_scope():
 
 def test_the_summary_section_heading_is_not_rooted():
     """Files move under on-premise/; the sidebar heading stays "SEPTEMBER 2026"."""
-    assert 'section_title = release_month.replace("-", " ").upper()' in PUB
+    assert 'release_month.replace("-", " ").upper()' in PUB
 
 
 # ── The on-premise information architecture ────────────────────────────────
