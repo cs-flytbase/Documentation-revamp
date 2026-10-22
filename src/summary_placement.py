@@ -137,7 +137,7 @@ def _section_dir(paths: list[str]) -> str:
     return ""
 
 
-def resolve_section(summary: str, wanted: str, allow_leaf: bool = True) -> Placement | None:
+def resolve_section(summary: str, wanted: str, allow_leaf: bool = True, exact_only: bool = False) -> Placement | None:
     """Where a page asked to go under `wanted` belongs, or None if unclear.
 
     `wanted` may be a breadcrumb ("Pre-Flight Modules > Planning"); the last
@@ -157,7 +157,9 @@ def resolve_section(summary: str, wanted: str, allow_leaf: bool = True) -> Place
         names = {norm(t) for t in _chain(item)[:-1]} | {norm(item.heading)}
         return bool(context & names)
 
-    for exact in (True, False):
+    # exact_only: a name the requester typed for a NEW section must not be
+    # fuzzy-matched to an existing page ("Alerts" is not "Alerts and Notifications").
+    for exact in ((True,) if exact_only else (True, False)):
         def hit(name: str) -> bool:
             n = norm(name)
             if exact:

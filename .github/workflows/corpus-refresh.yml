@@ -59,14 +59,22 @@ jobs:
           SOURCE: ${{ inputs.source || 'all' }}
           DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
           REMOVE_LEGACY: ${{ inputs.remove_legacy && '--remove-legacy' || '' }}
+          CORPUS_REPORTED_MARKER: ${{ runner.temp }}/corpus_reported
         run: |
           python -m src.corpus_sync --source "$SOURCE" $DRY_RUN $REMOVE_LEGACY
 
       - name: Alert if the job crashed before it could report
+        # Only a crash: when the sync reported (and alerted) itself it leaves
+        # the marker, and a second alert for the same failure is noise.
         if: failure()
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_ALERT_CHANNEL: ${{ vars.SLACK_ALERT_CHANNEL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CORPUS_REPORTED_MARKER: ${{ runner.temp }}/corpus_reported
         run: |
+          if [ -f "$CORPUS_REPORTED_MARKER" ]; then
+            echo "The sync reported this failure itself; no second alert."
+            exit 0
+          fi
           python -m src.corpus_sync --alert "Corpus refresh failed before it could report. The knowledge index may be stale. Run $RUN_URL"

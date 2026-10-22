@@ -38,6 +38,7 @@ from src.invariants import Published, RepoView, Result, check_all, table
 
 DOCS = "FlytBaseAILabs/flytbase-docs"
 RELEASES = "FlytBaseAILabs/flytbase-releases"
+FEATURE_NAME = "cockpit-3-0-video-overlays-update"
 FIXTURE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "cockpit_3_0"
 TARGET_SECTION = "Cockpit 3.0"
 DEFAULT_ALERT_CHANNEL = "C0BGB8F56JX"
@@ -168,9 +169,12 @@ def run_check(api, run_pipeline, tag: str, fixture: Path = FIXTURE, keep: bool =
     previous = os.environ.get("PIPELINE_SANDBOX")
     os.environ["PIPELINE_SANDBOX"] = tag
     try:
-        shutil.copytree(fixture, workdir / "bundle")
+        # Named like a real run's bundle (input_bundles/<feature name>): the
+        # branch slug comes from it, so the sandbox branch is predictable.
+        bundle = workdir / FEATURE_NAME
+        shutil.copytree(fixture, bundle)
         attention = missing_attention(md, files)
-        outcome = run_pipeline(str(workdir / "bundle"), mode="both", target_section=target_section,
+        outcome = run_pipeline(str(bundle), mode="both", target_section=target_section,
                                asset_audience=audience_for(files), attention=attention, doc_scope="cloud") or {}
         pr = outcome.get("pr_results") or {}
         branches = {repo: b for repo, b in pr.get("sandbox_branches") or []}

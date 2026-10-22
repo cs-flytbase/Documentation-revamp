@@ -611,12 +611,14 @@ class GitHubPublisher:
             notes.append(f"Could not read {summary_path}, so the page was not added to the sidebar. Add it before merging.")
             return None, None, None, False, notes
         if target_section:
-            placement = resolve_section(text, target_section, allow_leaf=True)
+            # A requested new section matches an existing one only exactly.
+            new_ok = getattr(self, "_allow_new_section", False)
+            placement = resolve_section(text, target_section, allow_leaf=True, exact_only=new_ok)
             if placement:
                 return placement, text, sha, True, notes
             # The requester asked for a new section by name: the only way a
             # new top-level group is ever created in the docs.
-            if getattr(self, "_allow_new_section", False):
+            if new_ok:
                 name = re.split(r"\s*>\s*", target_section.strip())[-1].strip()
                 if name:
                     text, placement = add_group(text, name, self.scope.summary_anchor)
