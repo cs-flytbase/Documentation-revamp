@@ -1,0 +1,10 @@
+{
+ "target_ia_node": {
+  "id": "cockpit-3-0",
+  "label": "In-Flight Modules > How to Manage Your Flight Operations > Cockpit 3.0",
+  "reasoning": "The four capabilities are part of the Cockpit 3.0 live video."
+ },
+ "feature_summary": "Four live video capabilities in Cockpit 3.0: Zone Overlays, Zone Proximity Warnings, Live Annotation and Go to Location from Video.",
+ "impacted_pages": [],
+ "relevant_chunks": []
+}

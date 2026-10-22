@@ -1,0 +1,61 @@
+{
+ "filename": "cockpit-3-0-video-overlays-update.md",
+ "title": "Cockpit 3.0 Video Overlays Update",
+ "feature_name": "Cockpit 3.0 Video Overlays",
+ "description": "Zones, proximity warnings, shared annotations and Go to Location, directly on the live video in Cockpit 3.0.",
+ "problem": "Operators had to switch between the live video and the map to see restricted airspace, point things out to the team or send the drone to a place they could see. Each switch cost time during a live operation.",
+ "introduction": "Cockpit 3.0 adds four capabilities to the live video. Each one is turned on or off in the Video overlays panel at the bottom-right of the video.",
+ "capabilities": [
+  {
+   "name": "Zone Overlays",
+   "description": "No-Fly Zones (NFZs) appear on the live video as red shaded areas, and the Geofence as a green outline. Operators can show or hide each type of zone.",
+   "asset": "zone-overlays.gif"
+  },
+  {
+   "name": "Zone Proximity Warnings",
+   "description": "A red glow on the edge of the video and a distance label warn the operator as the drone approaches an NFZ. The matching zone blinks on the map.",
+   "asset": "zone-proximity-warnings.gif"
+  },
+  {
+   "name": "Live Annotation",
+   "description": "Everyone viewing the same drone sees lines, arrows, circles and symbols drawn on the map or the live video. Marks fade on their own.",
+   "asset": "live-annotation.gif"
+  },
+  {
+   "name": "Go to Location from Video",
+   "description": "A right-click on the ground in the payload camera feed opens Go to Location with the coordinates filled in. A pin on the video marks the target.",
+   "asset": "go-to-location-from-video.gif"
+  }
+ ],
+ "key_benefits": [
+  {
+   "benefit": "Airspace in view",
+   "detail": "Restricted zones are visible in the picture the operator is already watching."
+  },
+  {
+   "benefit": "Earlier warnings",
+   "detail": "Operators see an approaching NFZ before the drone reaches it."
+  },
+  {
+   "benefit": "Clear coordination",
+   "detail": "Teams point to the same spot instead of describing it over the radio."
+  }
+ ],
+ "intended_users": [
+  {
+   "audience": "Flight operators",
+   "value": "Navigate and act on what they see without leaving the live video."
+  },
+  {
+   "audience": "Remote operations centers",
+   "value": "Coordinate on the same live feed in real time."
+  }
+ ],
+ "summary": [
+  "Four live video capabilities, managed from one panel.",
+  "Zones and warnings appear on the video itself.",
+  "Annotations and Go to Location turn what an operator sees into action."
+ ],
+ "hero_asset": "",
+ "availability": ""
+}

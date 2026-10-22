@@ -38,3 +38,20 @@ def test_short_sentences_and_different_facts_are_not_flagged():
 
 def test_a_clean_page_has_no_problems():
     assert redundancy_problems(FULL) == []
+
+
+def test_a_step_naming_features_is_not_the_overview_listing_them():
+    """Found by the Cockpit 3.0 replay: overlap measured against the shorter
+    sentence flagged every short step that named a feature."""
+    sections = {
+        "Overview": ["The Video overlays panel adds four capabilities to the live video: Zone Overlays, "
+                     "Zone Proximity Warnings, Live Annotation and Go to Location from Video."],
+        "Procedures": ["**Turn on** **Zone proximity warnings** in **Video overlays**."],
+    }
+    assert duplicate_sentences(sections) == []
+
+
+def test_a_restated_rule_with_a_few_extra_words_is_still_caught():
+    sections = {"Expected Behavior": ["Freehand lines fade after about 4 seconds on every screen."],
+                "Frequently Asked Questions": ["Freehand lines fade after about 4 seconds on every screen of the drone."]}
+    assert duplicate_sentences(sections)

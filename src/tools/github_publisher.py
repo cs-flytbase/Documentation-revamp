@@ -16,6 +16,7 @@ Usage:
 """
 
 import base64
+import os
 import posixpath
 import re
 import time
@@ -89,10 +90,27 @@ def _sanitize_target_path(raw: str) -> str:
     return "/".join(cleaned)
 
 
+_SANDBOX_TAG = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+
+
+def sandbox_prefix(tag: str) -> str:
+    """Branch prefix of a sandbox run. Everything under it is disposable."""
+    return f"sandbox/{tag}"
+
+
 class GitHubPublisher:
-    def __init__(self, doc_scope=CLOUD):
+    def __init__(self, doc_scope=CLOUD, sandbox: str | None = None):
+        """sandbox (or env PIPELINE_SANDBOX) runs the full publish flow on
+        disposable branches under sandbox/<tag>/ and never opens a PR, labels
+        anything or edits an existing page. The weekly end-to-end check
+        (src/e2e_check.py) uses it and deletes the branches afterwards."""
         if not GITHUB_TOKEN:
             raise ValueError("GITHUB_TOKEN is not set in .env")
+        tag = (os.environ.get("PIPELINE_SANDBOX", "") if sandbox is None else sandbox).strip()
+        if tag and not _SANDBOX_TAG.match(tag):
+            raise ValueError(f"invalid sandbox tag {tag!r}: use lowercase letters, digits and dashes")
+        self.sandbox = tag
+        self.sandbox_branches: list[tuple[str, str]] = []
         self.scope = doc_scope
         self._written: dict[str, set] = {}      # repo -> paths written on this run's branch
         self._tree_cache: dict[str, set] = {}   # repo -> paths on main
@@ -476,6 +494,19 @@ class GitHubPublisher:
         except Exception as e:
             return report_exception(f"Asset upload failed ({asset_name})", e)
 
+    def _existing_page(self, repo: str, file_path: str) -> tuple[str, str | None, str | None]:
+        """(path, content, sha) of the page a URL means. docs.flytbase.com/a/b is
+        either a/b.md or the folder page a/b/README.md; the first that exists
+        wins. (path, None, None) if neither does."""
+        candidates = [file_path]
+        if file_path.endswith(".md") and not file_path.endswith("/README.md"):
+            candidates.append(file_path[:-3] + "/README.md")
+        for path in candidates:
+            content, sha = self._get_file(repo, path, BASE_BRANCH)
+            if content is not None:
+                return path, content, sha
+        return file_path, None, None
+
     def _url_to_repo_path(self, source_url: str) -> tuple[str, str]:
         """Convert a source URL to (repo, file_path).
 
@@ -671,6 +702,8 @@ class GitHubPublisher:
 
     def _label_needs_attention(self, repo: str, pr_url: str) -> None:
         """Tag the PR so it stands out in the list. Never fails the publish."""
+        if self.sandbox:
+            return
         try:
             number = int(pr_url.rstrip("/").rsplit("/", 1)[-1])
             try:
@@ -683,6 +716,12 @@ class GitHubPublisher:
             print(f"    Could not label {pr_url}: {e}")
 
     def _open_pr(self, repo: str, branch: str, title: str, body: str, attention: list) -> str:
+        if self.sandbox:
+            # No PR and no label: the sandbox branch is the result, read back
+            # and deleted by the end-to-end check.
+            self.sandbox_branches.append((repo, branch))
+            print(f"    Sandbox: {repo}@{branch} committed; no PR opened")
+            return f"sandbox:{repo}@{branch}"
         url = self._create_pr(repo, branch, title, body)
         if attention:
             self._label_needs_attention(repo, url)
@@ -843,6 +882,8 @@ class GitHubPublisher:
     def _create_pr(self, repo: str, branch: str, title: str, body: str) -> str:
         """Open a pull request, or update the open one for this branch (a re-run).
         Returns the PR URL."""
+        if self.sandbox:
+            raise PublishError("a sandbox run must never open a pull request")
         try:
             data = self._api("POST", repo, "pulls", json={
                 "title": title, "body": body, "head": branch, "base": BASE_BRANCH,
@@ -994,6 +1035,8 @@ class GitHubPublisher:
 
         run_key = (slack_thread_ts or "").replace(".", "") or str(int(time.time()))
         branch = f"{self.scope.branch_prefix}/{feature_slug}-{run_key}"
+        if self.sandbox:
+            branch = f"{sandbox_prefix(self.sandbox)}/{feature_slug}"
         results = {"docs_pr": None, "releases_pr": None, "errors": []}
         if draft_result.get("_doc_gaps"):
             results["doc_gaps"] = list(draft_result["_doc_gaps"])
@@ -1045,13 +1088,17 @@ class GitHubPublisher:
                     att.append(f"{Path(asset_path).name} could not be uploaded to {folder}: {err}. Add it by hand.")
 
         def patch_impacted(repo, host, att, key):
+            if self.sandbox:  # never edit a real page, even on a disposable branch
+                results.setdefault("sandbox_skipped_edits", 0)
+                results["sandbox_skipped_edits"] += sum(1 for e in impacted_edits if host in e.get("source_url", ""))
+                return
             for edit in impacted_edits:
                 url = edit.get("source_url", "")
                 if host not in url:
                     continue
                 try:
                     _, file_path = self._url_to_repo_path(url)
-                    existing_content, existing_sha = self._get_file(repo, file_path, BASE_BRANCH)
+                    file_path, existing_content, existing_sha = self._existing_page(repo, file_path)
                     if existing_content is None:
                         att.append(f"Cross-link not added: {file_path} does not exist.")
                         continue
@@ -1258,6 +1305,8 @@ class GitHubPublisher:
                 if not results.get("releases_pr"):
                     self._discard(RELEASES_REPO)
 
+        if self.sandbox:
+            results["sandbox_branches"] = [list(x) for x in self.sandbox_branches]
         results["needs_attention"] = list(dict.fromkeys(shared + att_rel + att_docs))
         results["fixes"] = list(dict.fromkeys(fixes))
         return results

@@ -143,7 +143,14 @@ class FakeGitHub:
             self.commit_log.append((repo, body["message"], changed))
             return {"sha": c}
         if path.startswith("git/trees/") and method == "GET":
-            return {"tree": [{"path": p, "type": "blob"} for p in self.tree_of(repo, "main")]}
+            ref = path[len("git/trees/"):].split("?", 1)[0]
+            if ref in self.trees:  # a tree sha, as the real API takes
+                return {"tree": [{"path": p, "type": "blob"} for p in self.trees[ref]]}
+            ref = ref if (repo, ref) in self.refs else "main"
+            return {"tree": [{"path": p, "type": "blob"} for p in self.tree_of(repo, ref)]}
+        if path.startswith("git/matching-refs/heads/") and method == "GET":
+            prefix = path[len("git/matching-refs/heads/"):]
+            return [{"ref": f"refs/heads/{b}"} for (r, b) in sorted(self.refs) if r == repo and b.startswith(prefix)]
         if path.startswith("contents/") and method == "GET":
             ref = kw.get("params", {}).get("ref", "main")
             if (repo, ref) not in self.refs:

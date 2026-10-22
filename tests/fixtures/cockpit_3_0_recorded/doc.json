@@ -1,0 +1,206 @@
+{
+ "filename": "cockpit-3-0-video-overlays-update.md",
+ "target_path": "in-flight-modules/how-to-manage-your-flight-operations/cockpit-3-0",
+ "title": "Cockpit 3.0 Video Overlays",
+ "description": "Zone Overlays, Zone Proximity Warnings, Live Annotation and Go to Location from Video on the Cockpit 3.0 live video.",
+ "overview": "The Video overlays panel adds four capabilities to the Cockpit 3.0 live video: Zone Overlays, Zone Proximity Warnings, Live Annotation and Go to Location from Video. The panel sits at the bottom-right of the video.",
+ "when_to_use": [
+  "Flying near No-Fly Zones (NFZs) or close to the Geofence.",
+  "Several people are monitoring the same drone and need to point things out."
+ ],
+ "when_not_to_use": [
+  "Marks must stay on the map after the operation: use Annotations instead."
+ ],
+ "availability": "Behind a feature flag. Contact the FlytBase team to enable it for your organization.",
+ "prerequisites": [
+  "The zones are synced to the drone.",
+  "The payload camera feed is streaming."
+ ],
+ "dependencies": [
+  "Go to Location from Video depends on the Fast telemetry link under **Drone settings > Telemetry**."
+ ],
+ "navigation": [
+  "**Video overlays** at the bottom-right of the live video."
+ ],
+ "controls_and_indicators": [
+  {
+   "name": "**Video overlays**",
+   "description": "Button at the bottom-right of the video that opens the overlay panel."
+  },
+  {
+   "name": "**Zone overlays**",
+   "description": "Toggle that shows NFZs and the Geofence on the video."
+  },
+  {
+   "name": "**Zone proximity warnings**",
+   "description": "Toggle for the NFZ warnings on the video."
+  },
+  {
+   "name": "**Live annotations**",
+   "description": "Toggle that shows or hides marks from other people."
+  },
+  {
+   "name": "**Go to location**",
+   "description": "Right-click menu option that opens the Go to Location panel."
+  }
+ ],
+ "procedures": [
+  {
+   "task": "show zones on the video",
+   "steps": [
+    {
+     "text": "**Click** **Video overlays**. The panel opens.",
+     "asset": "zone-overlays-01-video-overlays-panel.png"
+    },
+    {
+     "text": "**Turn on** **Zone overlays**. Cockpit draws NFZs in red and the Geofence in green.",
+     "asset": "zone-overlays-02-nfz-and-geofence-on-video.png"
+    },
+    {
+     "text": "**Click** the eye icon next to **NFZs**. Cockpit hides the NFZs.",
+     "asset": "zone-overlays-03-nfzs-hidden.png"
+    },
+    {
+     "text": "**Click** the eye icon next to **Geofence**. Cockpit hides the Geofence.",
+     "asset": "zone-overlays-04-geofence-hidden.png"
+    },
+    {
+     "text": "**Watch** the zones on the live video as the camera moves.",
+     "asset": "zone-overlays.gif"
+    }
+   ]
+  },
+  {
+   "task": "read a proximity warning",
+   "steps": [
+    {
+     "text": "**Turn on** **Zone proximity warnings** in **Video overlays**.",
+     "asset": "zone-proximity-02-toggle-in-video-overlays.png"
+    },
+    {
+     "text": "**Check** the label at the top of the video. The arrow points to the zone and the label shows the distance.",
+     "asset": "zone-proximity-01-red-glow-distance-and-blinking-nfz.png"
+    },
+    {
+     "text": "**Look** at the map. The matching zone blinks while the warning shows.",
+     "asset": "zone-proximity-warnings.gif"
+    }
+   ]
+  },
+  {
+   "task": "draw a live annotation",
+   "steps": [
+    {
+     "text": "**Turn on** **Live annotations** in **Video overlays**.",
+     "asset": "live-annotation-01-toggle-in-video-overlays.png"
+    },
+    {
+     "text": "**Click** the **Live annotation** button (pen icon). The toolbar opens.",
+     "asset": "live-annotation-02-toolbar-freehand-selected.png"
+    },
+    {
+     "text": "**Draw** with **Freehand** on the video. Everyone on the drone sees the line.",
+     "asset": "live-annotation-03-freehand-circle-on-video.png"
+    },
+    {
+     "text": "**Drag** with **Direction** to draw an arrow.",
+     "asset": "live-annotation-04-direction-arrow.png"
+    },
+    {
+     "text": "**Click** **Place a symbol** and choose a symbol.",
+     "asset": "live-annotation-05-symbol-menu.png"
+    },
+    {
+     "text": "**Click** the spot on the video where the symbol goes.",
+     "asset": "live-annotation-06-symbols-placed.png"
+    },
+    {
+     "text": "**Pick** an ink color for the next mark.",
+     "asset": "live-annotation-07-ink-colour-menu.png"
+    },
+    {
+     "text": "**Click** **Remove my marks for everyone**. A tick confirms the removal.",
+     "asset": "live-annotation-08-marks-removed-with-tick.png"
+    },
+    {
+     "text": "**Watch** the marks appear for every viewer and fade on their own.",
+     "asset": "live-annotation.gif"
+    }
+   ]
+  },
+  {
+   "task": "send the drone to a point on the video",
+   "steps": [
+    {
+     "text": "**Right-click** the ground in the payload camera feed. The menu shows **Go to location**.",
+     "asset": "go-to-location-01-right-click-menu.png"
+    },
+    {
+     "text": "**Click** **Go to location**. The panel opens with **Latitude** and **Longitude** filled in.",
+     "asset": "go-to-location-02-panel-with-coordinates.png"
+    },
+    {
+     "text": "**Click** **Launch**.",
+     "asset": "go-to-location-03-launch.png"
+    },
+    {
+     "text": "**Watch** the pin on the video. It stays fixed to the ground.",
+     "asset": "go-to-location-04-target-pin-on-video.png"
+    },
+    {
+     "text": "**Wait** for **Reached location** at the top of the video.",
+     "asset": "go-to-location-from-video.gif"
+    }
+   ]
+  }
+ ],
+ "expected_behavior": [
+  "A proximity warning starts 40 m from an NFZ.",
+  "Freehand lines fade after about 4 seconds.",
+  "Up to eight symbols stay on one camera at a time; the oldest is removed first."
+ ],
+ "operating_constraints": [
+  "Proximity warnings cover NFZs only, not the Geofence.",
+  "The Go to Location point must be on the ground and within 5 km of the drone."
+ ],
+ "edge_cases": [
+  {
+   "condition": "Zone data is unavailable",
+   "behavior": "Cockpit shows that warnings are off instead of showing clear airspace."
+  }
+ ],
+ "system_messages": [
+  {
+   "message": "Only available on the payload camera.",
+   "meaning": "The feature does not work on the FPV or dock camera.",
+   "action": "Switch the video to the payload camera."
+  }
+ ],
+ "faqs": [
+  {
+   "question": "Why does no glow appear near the Geofence",
+   "answer": "Warnings cover NFZs only. See Operating Constraints."
+  }
+ ],
+ "after_completion": [
+  "Cockpit remembers each toggle the next time the panel opens."
+ ],
+ "glossary": [
+  {
+   "term": "NFZ",
+   "definition": "A No-Fly Zone synced to the drone."
+  }
+ ],
+ "related_pages": [
+  {
+   "title": "Cockpit 3.0",
+   "url": "../cockpit-3-0.md"
+  },
+  {
+   "title": "Go to Location (GTL)",
+   "url": "../../flight-execution/go-to-location-gtl.md"
+  }
+ ],
+ "section_assets": {},
+ "impacted_page_edits": []
+}
