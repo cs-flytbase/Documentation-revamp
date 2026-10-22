@@ -18,7 +18,7 @@ import re
 from src.doc_template import section_text
 
 MIN_TOKENS = 6          # shorter sentences ("Off by default.") repeat legitimately
-SIMILARITY = 0.75       # share of content words two sentences have in common
+SIMILARITY = 0.75       # Dice overlap of the content words of two sentences
 MAX_PROBLEMS = 10       # keep the retry prompt focused
 
 _STOP = {"a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "if", "in", "is", "it", "its", "of",
@@ -56,7 +56,10 @@ def duplicate_sentences(sections: dict[str, list[str]]) -> list[tuple[str, str, 
                 for other, otoks, osent in seen:
                     if other == name:
                         continue
-                    overlap = len(toks & otoks) / min(len(toks), len(otoks))
+                    # Dice: symmetric, so a short step that names a feature is not
+                    # "the same fact" as an Overview sentence listing every feature
+                    # (the Cockpit 3.0 replay caught that false positive).
+                    overlap = 2 * len(toks & otoks) / (len(toks) + len(otoks))
                     if overlap >= SIMILARITY:
                         found.append((other, name, s))
                         break

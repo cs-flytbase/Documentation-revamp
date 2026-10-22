@@ -1,0 +1,112 @@
+[
+ {
+  "file_name": "zone-overlays.gif",
+  "description": "Zone Overlays turned on in the Video overlays panel, with NFZs drawn in red and the Geofence in green on the live video.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "zone-overlays-01-video-overlays-panel.png",
+  "description": "The Video overlays panel open at the bottom-right of the video, with the Zone overlays toggle.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "zone-overlays-02-nfz-and-geofence-on-video.png",
+  "description": "Red shaded NFZs with name and distance labels and a green Geofence outline on the live video.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "zone-overlays-03-nfzs-hidden.png",
+  "description": "The NFZ eye icon turned off, so only the green Geofence outline remains on the video.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "zone-overlays-04-geofence-hidden.png",
+  "description": "The Geofence eye icon turned off, so only the red NFZs remain on the video.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "zone-proximity-warnings.gif",
+  "description": "A red glow growing on the edge of the video as the drone approaches an NFZ, while the zone blinks on the map.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "zone-proximity-01-red-glow-distance-and-blinking-nfz.png",
+  "description": "A red edge glow, an NFZ label with an arrow and distance at the top of the video, and the matching zone blinking on the map.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "zone-proximity-02-toggle-in-video-overlays.png",
+  "description": "The Zone proximity warnings toggle in the Video overlays panel.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "live-annotation.gif",
+  "description": "A person drawing a circle and placing symbols on the live video, seen by everyone viewing the drone.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "live-annotation-01-toggle-in-video-overlays.png",
+  "description": "The Live annotations toggle in the Video overlays panel.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "live-annotation-02-toolbar-freehand-selected.png",
+  "description": "The Live Annotation toolbar open above the pen button, with Freehand selected.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "live-annotation-03-freehand-circle-on-video.png",
+  "description": "A freehand circle drawn around an object on the live video, labeled with the author's name.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "live-annotation-04-direction-arrow.png",
+  "description": "A direction arrow drawn on the live video.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "live-annotation-05-symbol-menu.png",
+  "description": "The Place a symbol menu listing Point of interest, Person, Vehicle and Hazard.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "live-annotation-06-symbols-placed.png",
+  "description": "Person and Vehicle symbols placed on the live video.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "live-annotation-07-ink-colour-menu.png",
+  "description": "The ink color menu with Red, Orange, Amber, Green and Blue.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "live-annotation-08-marks-removed-with-tick.png",
+  "description": "The Remove my marks for everyone button showing a tick after the marks are removed.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "go-to-location-from-video.gif",
+  "description": "A right-click on the ground in the video, the Go to Location panel, the launch and the target pin as the drone flies there.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "go-to-location-01-right-click-menu.png",
+  "description": "The right-click menu on the live video showing Go to location and the distance from the drone.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "go-to-location-02-panel-with-coordinates.png",
+  "description": "The Go to Location panel with Latitude and Longitude filled in from the selected point.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "go-to-location-03-launch.png",
+  "description": "The Launch button in the Go to Location panel.",
+  "section_heading": ""
+ },
+ {
+  "file_name": "go-to-location-04-target-pin-on-video.png",
+  "description": "The target pin fixed to the ground on the live video, showing the remaining distance and altitude.",
+  "section_heading": ""
+ }
+]
