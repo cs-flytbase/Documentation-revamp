@@ -61,6 +61,16 @@ def _key(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", stem).strip("-")
 
 
+def named_media(text: str) -> list[str]:
+    """Every media file name the material mentions, once each, in order."""
+    out = []
+    for m in _NAMED.finditer(text or ""):
+        name = m.group(1).strip().strip("'\"`").split("/")[-1]
+        if name not in out:
+            out.append(name)
+    return out
+
+
 def missing_named(text: str, received: list[str]) -> list[str]:
     """Media file names mentioned in the material that were never received."""
     have = {_key(n) for n in received}

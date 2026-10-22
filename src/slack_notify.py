@@ -77,6 +77,19 @@ def build_message(pr: dict, status: dict | None, run_url: str) -> str | None:
 
 
 def main() -> int:
+    """Post the outcome, and journal whether the requester was told."""
+    from src.run_journal import RunJournal
+    journal = RunJournal.from_env()
+    try:
+        code, detail = _notify()
+    except Exception as e:  # noqa: BLE001 - journalled, then re-raised for the traceback
+        journal.post("notify", "failed", f"{type(e).__name__}: {e}")
+        raise
+    journal.post("notify", "ok" if code == 0 else "failed", detail)
+    return code
+
+
+def _notify() -> tuple[int, str]:
     env = os.environ
     token = env.get("SLACK_BOT_TOKEN", "")
     channel, thread_ts = env.get("PL_SLACK_CHANNEL", ""), env.get("PL_SLACK_THREAD_TS", "")
@@ -87,10 +100,10 @@ def main() -> int:
     message = build_message(pr, status, run_url)
     if message is None:
         print("Nothing to add: the progress message already reports the failure.")
-        return 0
+        return 0, "the progress message already reported the failure"
     if not (token and channel and thread_ts):
         print(message)
-        return 0
+        return 0, "no Slack thread for this run; printed to the log"
     req = urllib.request.Request(
         "https://slack.com/api/chat.postMessage",
         data=json.dumps({"channel": channel, "thread_ts": thread_ts, "text": message, "unfurl_links": False}).encode(),
@@ -100,9 +113,9 @@ def main() -> int:
         data = json.loads(resp.read().decode())
     if not data.get("ok"):
         print(f"Slack rejected the message: {data.get('error')}")
-        return 1
+        return 1, f"Slack rejected the message: {data.get('error')}"
     print(f"Posted to Slack: {channel}/{thread_ts}")
-    return 0
+    return 0, "outcome posted in the thread"
 
 
 if __name__ == "__main__":

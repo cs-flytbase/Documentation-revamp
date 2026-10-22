@@ -98,6 +98,8 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           PL_SLACK_CHANNEL: ${{ steps.payload.outputs.slack_channel }}
           PL_SLACK_THREAD_TS: ${{ steps.payload.outputs.slack_thread_ts }}
+          PL_WORKER_URL: ${{ steps.payload.outputs.worker_url }}
+          PL_CONTENT_TOKEN: ${{ secrets.CONTENT_TOKEN }}
         run: python3 -m src.slack_notify
 
       - name: Upload pipeline output
