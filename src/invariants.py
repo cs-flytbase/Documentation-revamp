@@ -90,7 +90,9 @@ def no_duplicate_assets(p: Published) -> Result:
     """No file shipped twice: no "x-2.gif" next to "x.gif", no image embedded twice on one page."""
     problems = []
     for label, repo in (("docs", p.docs), ("releases", p.releases)):
-        names = {posixpath.basename(x) for x in repo.paths if "/assets/" in f"/{x}"}
+        # Only the files this run's pages embed. Older pages' assets already in
+        # the folder (e.g. "Fleet view-1.png" from 2025) are not this run's.
+        names = {posixpath.basename(f) for text in repo.pages.values() for _, f in _embeds(text)}
         for n in names:
             m = re.match(r"^(.*)-(\d+)(\.[a-z0-9]+)$", n, re.I)
             if m and f"{m.group(1)}{m.group(3)}" in names:

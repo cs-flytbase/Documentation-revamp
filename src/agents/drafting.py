@@ -349,6 +349,12 @@ Use only the assets relevant to this scope.
             problems = check_doc_fields(doc_fields, doc_assets, require_all=whole_run)
             if problems:
                 doc_fields = self._retry_fields(DOC_PAGE_PROMPT, doc_msg, doc_fields, problems, "doc page")
+            # Repetition is the one problem a model often reintroduces while fixing
+            # others (live e2e 2026-10-22: "40 m" in two sections after one retry).
+            # One more pass on repetition alone, naming where each fact stays.
+            repeats = redundancy_problems(doc_fields)
+            if repeats:
+                doc_fields = self._retry_fields(DOC_PAGE_PROMPT, doc_msg, doc_fields, repeats, "doc page repetition")
         else:
             print("    [Drafting] Skipping doc page (mode: release_only)")
 
