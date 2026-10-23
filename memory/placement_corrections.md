@@ -14,3 +14,5 @@ Appended to by the memory updater when placement is corrected in PRs.
 - [2026-08-25] [placement] Always ensure that content is consolidated into the correct location and section to avoid duplication.
 
 - [2026-08-27] [placement] Always ensure that pages are created in their correct path to avoid breaking the documentation structure.
+
+- [2026-10-23] [placement] When screenshots are supplied as procedural setup steps, place them together in the corresponding setup/workflow section in the same sequence, rather than distributing them across feature-description sections based only on filename order.
