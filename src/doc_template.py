@@ -106,7 +106,6 @@ off the page. NEVER invent content to fill a field, and never guess.
   "overview": "REQUIRED. One paragraph: what the feature is and what problem it solves.",
   "when_to_use": ["Situation in which to use it"],
   "when_not_to_use": ["Situation in which not to use it, and what to use instead"],
-  "availability": "Feature flag, plan, cloud or on-premises availability, and how to get access.",
   "compatibility": ["Supported dock, drone, payload or camera"],
   "prerequisites": ["What must be true before starting: account, setting, hardware state"],
   "dependencies": ["What the feature relies on, and what happens without it"],
@@ -150,6 +149,10 @@ TONE AND STYLE
 - Present tense, active voice. Spell out acronyms on first use.
 - Every section makes sense on its own: name the feature instead of "this".
 - US English spelling: color, behavior, center, meter, organization.
+- Customer-facing only. NEVER include internal details: feature-flag code names
+  (e.g. THREE_D_GRID), cluster or server names, release dates or times, build or
+  version numbers, pricing, ticket or PR numbers. NEVER comment on the source
+  material ("the source does not say..."): if it is not covered, leave it out.
 
 Field rules:
 - procedures: one task per thing a user does. Steps are atomic.
@@ -251,7 +254,6 @@ def section_text(data: dict) -> dict[str, list[str]]:
     out = {
         "Overview": [_clean(data.get("overview"))],
         "Use Cases": _items(data.get("when_to_use")) + _items(data.get("when_not_to_use")),
-        "Availability": [_clean(data.get("availability"))],
         "Compatibility": _items(data.get("compatibility")),
         "Prerequisites": _items(data.get("prerequisites")),
         "Dependencies": _items(data.get("dependencies")),
@@ -312,7 +314,8 @@ def check_fields(data: dict, doc_assets: list[str], require_all: bool = True) ->
 
 
 def render(data: dict, doc_assets: list[str], youtube_link: str = "",
-           asset_descriptions: dict | None = None, place_leftovers: bool = True) -> tuple[dict, list[str]]:
+           asset_descriptions: dict | None = None, place_leftovers: bool = True,
+           feature_flag: str = "") -> tuple[dict, list[str]]:
     """Build the doc page. Returns ({"filename","frontmatter","content","target_path"}, omitted).
 
     omitted lists the master template sections left out because the material
@@ -350,9 +353,15 @@ def render(data: dict, doc_assets: list[str], youtube_link: str = "",
     if use or avoid:
         body["use_cases"] = (["### When to Use", ""] + bullets(use) if use else []) + \
                             (["### When Not to Use", ""] + bullets(avoid) if avoid else [])
-    availability = _clean(data.get("availability"))
-    if availability:
-        body["availability"] = [availability, ""]
+    # Availability is built by code from the requester's feature-flag answer,
+    # never written by the model: on 2026-10-22 it filled this section with
+    # internal release notes (cluster names, a UTC release time, removed flag
+    # code names). No flag, no section.
+    flag = (feature_flag or "").strip()
+    if flag and flag.lower() != "none":
+        name = _clean(data.get("title")) or "This feature"
+        body["availability"] = [f"{name} is behind a feature flag and is not enabled by default. "
+                                "Contact the FlytBase team to enable it for your organization.", ""]
     for key in ("compatibility", "prerequisites", "dependencies", "roles_and_permissions", "navigation",
                 "expected_behavior", "operating_constraints", "after_completion"):
         items = _items(data.get(key))
@@ -396,7 +405,7 @@ def render(data: dict, doc_assets: list[str], youtube_link: str = "",
     sections, omitted = [], []
     for key, heading in SECTIONS:
         content = body.get(key, []) + sec_imgs(key)
-        if not body.get(key) and key != "related_pages":
+        if not body.get(key) and key not in ("related_pages", "availability"):
             omitted.append(heading)
         if content:
             sections.append([key, heading, content])

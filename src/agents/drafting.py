@@ -365,12 +365,14 @@ Use only the assets relevant to this scope.
         style_report, gaps = {}, []
         doc_result, release_result = {}, {}
         if doc_fields:
-            doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, alts, place_leftovers=whole_run)
+            doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, alts, place_leftovers=whole_run,
+                                          feature_flag=feature_flag)
             doc_result, issues = self._style_pass("doc", doc_result)
             if style_errors(issues):
                 doc_fields = self._retry_fields(DOC_PAGE_PROMPT, doc_msg, doc_fields,
                                                 [f"style: {i.message}" for i in style_errors(issues)], "doc page style")
-                doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, alts, place_leftovers=whole_run)
+                doc_result, gaps = render_doc(doc_fields, doc_assets, youtube_link, alts, place_leftovers=whole_run,
+                                          feature_flag=feature_flag)
                 doc_result, issues = self._style_pass("doc", doc_result)
             if issues:
                 style_report["doc_page"] = [f"[{i.severity}] {i}" for i in issues][:15]
