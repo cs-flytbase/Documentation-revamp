@@ -38,7 +38,7 @@ def _h2(content):
 
 
 def test_full_page_has_all_sections_in_master_order_with_video_first():
-    page, omitted = render(FULL, ASSETS, youtube_link="https://youtu.be/v")
+    page, omitted = render(FULL, ASSETS, youtube_link="https://youtu.be/v", feature_flag="zone_overlays")
     c = page["content"]
     assert _h2(c) == [h for _, h in SECTIONS]
     assert c.splitlines()[2] == '{% embed url="https://youtu.be/v" %}'

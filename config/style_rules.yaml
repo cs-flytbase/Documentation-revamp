@@ -41,6 +41,17 @@ forbidden_claims:
     reason: FlytBase does not support multi-factor authentication. Remove the claim.
   - pattern: '(?i)\bSkySense\b[^.\n]{0,40}\bFlink\b'
     reason: SkySense is a Flex app, not a Flink.
+# Internal details and remarks about the source never reach customers
+# (2026-10-22: a doc page listed THREE_D_GRID, a UTC release time and
+# "The source does not record the EU release time or pricing").
+  - pattern: '\b[A-Z][A-Z0-9]{2,}(?:_[A-Z0-9]+)+\b'
+    reason: internal identifier (feature flag or config name). Customers never see it; remove it.
+  - pattern: '\b\d{1,2}:\d{2}\s?UTC\b'
+    reason: internal release timing. Remove it.
+  - pattern: '(?i)\b(the\s+)?(source( material| document)?|PM doc(ument)?|material)\s+(does not|doesn''t|did not|is silent|lacks|omits|never)'
+    reason: a remark about the source material. Leave the topic out instead of commenting on it.
+  - pattern: '(?i)\bnot\s+(recorded|specified|stated|documented|provided|covered)\s+in\s+the\s+(source|material|PM)'
+    reason: a remark about the source material. Leave the topic out instead of commenting on it.
 
 # Product names. Each 'wrong' is a case-sensitive regex, replaced with 'right'
 # automatically. Only unambiguous spellings belong here.
@@ -101,3 +112,4 @@ uk_spellings:
   - {wrong: grey, right: gray}
   - {wrong: favourite, right: favorite}
   - {wrong: cancelled, right: canceled}
+
